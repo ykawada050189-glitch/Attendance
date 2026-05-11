@@ -8,6 +8,7 @@ const STATUS_TYPES = [
   { code: 'absent',    label: '欠席' },
   { code: 'tardy',     label: '遅刻' },
   { code: 'early',     label: '早退' },
+  { code: 'infirmary', label: '保健室' },
   { code: 'suspended', label: '出停' },
   { code: 'mourning',  label: '忌引' },
   { code: 'official',  label: '公欠' },
@@ -18,12 +19,12 @@ const STATUS_LABEL = Object.fromEntries(STATUS_TYPES.map(s => [s.code, s.label])
 
 // 状態のアイコン文字
 const STATUS_ICON = {
-  present: '出', absent: '欠', tardy: '遅', early: '早',
+  present: '出', absent: '欠', tardy: '遅', early: '早', infirmary: '保',
   suspended: '停', mourning: '忌', official: '公', abroad: '留', leave: '休',
 };
 
 const PRIMARY_STATUSES   = ['present','absent','tardy','early'];
-const SECONDARY_STATUSES = ['suspended','mourning','official','abroad','leave'];
+const SECONDARY_STATUSES = ['infirmary','suspended','mourning','official','abroad','leave'];
 
 const WEEKDAYS = ['月','火','水','木','金','土'];
 
@@ -166,6 +167,7 @@ function defaultState() {
     rules: JSON.parse(JSON.stringify(DEFAULT_RULES)),
     attendance: {},
     overrides: {},
+    subjectsByGrade: { '1': [], '2': [], '3': [] }, // プルダウン用の教科候補(学年別)
   };
 }
 function loadAll() {
@@ -206,7 +208,9 @@ let state = loadAll();
   for (const date in state.attendance) {
     for (const no in state.attendance[date]) {
       const a = state.attendance[date][no];
-      if (Array.isArray(a.periods)) {
+      // 旧形式 periods 配列 → period+during 形式 への移行は tardy/early のみ対象
+      // (infirmary の periods 配列はそのまま残す)
+      if (Array.isArray(a.periods) && (a.status === 'tardy' || a.status === 'early')) {
         if (a.status === 'tardy' && a.periods.length > 0) {
           a.period = Math.max(...a.periods) + 1;
           a.during = false;
@@ -218,6 +222,20 @@ let state = loadAll();
         dirty = true;
       }
     }
+  }
+  // subjectsByGrade の初期化(既存ユーザ向け)
+  if (!state.subjectsByGrade) {
+    state.subjectsByGrade = { '1': [], '2': [], '3': [] };
+    // 現在の時間割から教科を抽出して、現在の学年用に保存
+    const subs = new Set();
+    for (const wd of ['月','火','水','木','金','土']) {
+      for (const s of (state.timetable[wd] || [])) if (s && s.trim()) subs.add(s.trim());
+    }
+    state.subjectsByGrade[state.config.grade] = [...subs]; // Setの挿入順を保持
+    dirty = true;
+  }
+  for (const g of ['1','2','3']) {
+    if (!Array.isArray(state.subjectsByGrade[g])) { state.subjectsByGrade[g] = []; dirty = true; }
   }
   if (dirty) saveAll();
 })();
@@ -435,6 +453,8 @@ const WIZARD_STEPS = [
 ];
 let wizardStep = 1;
 const wizardApplied = { step2:false, step3:false, step4:false, step5:false, step6:false };
+let wizardCommit = null; // 各ステップが「登録」ボタン押下時に実行する関数を設定する
+const wizardSession = { step5InitDone: false }; // セッション内フラグ(時間割クリア済みなど)
 
 function renderYearUpdate() {
   // プログレスバー
@@ -448,6 +468,8 @@ function renderYearUpdate() {
   progEl.querySelectorAll('.step').forEach(el => {
     el.onclick = () => { wizardStep = parseInt(el.dataset.step); renderYearUpdate(); };
   });
+  // 各ステップを描画する直前にcommit関数をリセット
+  wizardCommit = null;
   // 各ステップ
   const c = document.getElementById('wizard-content');
   switch (wizardStep) {
@@ -470,7 +492,7 @@ function renderYearUpdate() {
     next.textContent = '🏠 ホームへ戻る';
     next.classList.add('primary');
   } else {
-    next.textContent = '次へ ▶';
+    next.textContent = '登録';
   }
   back.onclick = () => { if (wizardStep > 1) { wizardStep--; renderYearUpdate(); } };
   skip.onclick = () => { if (wizardStep < 7) { wizardStep++; renderYearUpdate(); } };
@@ -478,13 +500,18 @@ function renderYearUpdate() {
     if (wizardStep === 7) {
       // 完了 → ダッシュボード
       wizardStep = 1;
-      // applied フラグもリセット
       Object.keys(wizardApplied).forEach(k => wizardApplied[k] = false);
+      wizardSession.step5InitDone = false;
       showView('dashboard');
-    } else {
-      wizardStep++;
-      renderYearUpdate();
+      return;
     }
+    // ステップ固有の処理(登録)があれば実行
+    if (typeof wizardCommit === 'function') {
+      const ok = wizardCommit();
+      if (ok === false) return; // 失敗した場合は進まない
+    }
+    wizardStep++;
+    renderYearUpdate();
   };
 }
 
@@ -572,7 +599,7 @@ function renderWizardStep3(c) {
     <div class="wizard-current-info">
       現在: <strong>${state.config.year}年度 ${getClassName()}</strong>（土曜${state.config.saturdayClass?'授業あり':'休み'}）
     </div>
-    <p>次年度の情報を入力してください。「適用」を押すと反映されます。</p>
+    <p>次年度の情報を入力し、画面下部の「登録」ボタンで反映してください。</p>
     <div class="row">
       <label>新しい年度:
         <input type="number" id="wiz-year" min="2020" max="2099" value="${nextYear}">
@@ -591,8 +618,7 @@ function renderWizardStep3(c) {
         <input type="checkbox" id="wiz-saturday" ${state.config.saturdayClass?'checked':''}>
       </label>
     </div>
-    <button id="wiz-class-apply" class="primary">この内容で適用</button>
-    <p class="hint">適用後も「初期設定」タブから再編集できます。</p>
+    <p class="hint">登録後も「登録情報」タブから再編集できます。</p>
   `;
   // クラスレターA-M
   const sel = document.getElementById('wiz-class-letter');
@@ -603,7 +629,8 @@ function renderWizardStep3(c) {
     if (opt.value === state.config.classLetter) opt.selected = true;
     sel.appendChild(opt);
   }
-  document.getElementById('wiz-class-apply').onclick = () => {
+  // 「登録」ボタン押下時の処理を登録
+  wizardCommit = () => {
     state.config.year = parseInt(document.getElementById('wiz-year').value);
     state.config.grade = document.getElementById('wiz-grade').value;
     state.config.classLetter = document.getElementById('wiz-class-letter').value;
@@ -612,7 +639,7 @@ function renderWizardStep3(c) {
     updateClassInfoBar();
     wizardApplied.step3 = true;
     toast('クラス情報を更新しました', 'success');
-    renderYearUpdate();
+    return true;
   };
 }
 
@@ -623,19 +650,15 @@ function renderWizardStep4(c) {
     <div class="wizard-current-info">
       現在の名簿: <strong>${state.students.length}名</strong>
     </div>
-    <p>下記からひとつ選んでください。</p>
+    <p>下記からひとつ選んでください。確定したら画面下部の「登録」を押してください。</p>
     <div class="wizard-choice-block" id="wiz-stu-keep">
       <h4>① 現在の名簿(${state.students.length}名)を維持する</h4>
       <p class="hint" style="margin:0;">担任の継続持ち上がりなど、同じメンバーで進める場合。</p>
     </div>
     <div class="wizard-choice-block" id="wiz-stu-excel">
-      <h4>② Excelから新しい名簿を取り込む</h4>
-      <p class="hint" style="margin:0;">「番号」「氏名（名前）」列のあるExcelファイルから自動取り込み。プレビューで確認してから登録します。</p>
+      <h4>② 新しい名簿を登録する</h4>
+      <p class="hint" style="margin:0;">Excelファイルからの取り込み、コピー&貼り付け、手入力に対応しています。</p>
       <div id="wiz-stu-excel-area" style="margin-top:10px;"></div>
-    </div>
-    <div class="wizard-choice-block danger" id="wiz-stu-clear">
-      <h4>③ 全削除して空から始める</h4>
-      <p class="hint" style="margin:0;">既存名簿を削除します（出欠記録は別物として残ります）。</p>
     </div>
   `;
   document.getElementById('wiz-stu-keep').onclick = () => {
@@ -647,26 +670,37 @@ function renderWizardStep4(c) {
     if (e.target.closest('#wiz-stu-excel-area')) return;
     showWizardExcelArea();
   };
-  document.getElementById('wiz-stu-clear').onclick = () => {
-    if (!confirm('生徒名簿を全削除しますか？（出欠記録は残ります）')) return;
-    state.students = [];
-    saveAll();
-    updateClassInfoBar();
-    wizardApplied.step4 = true;
-    toast('名簿を全削除しました', 'success');
-    renderYearUpdate();
-  };
 
   function showWizardExcelArea() {
     const area = document.getElementById('wiz-stu-excel-area');
+    area.classList.remove('hidden');
     area.innerHTML = `
-      <input type="file" id="wiz-stu-excel-file" accept=".xlsx,.xls">
+      <p class="hint" style="margin-top:0;">いずれかの方法で読み込めます。</p>
+      <div style="border-left:3px solid var(--primary); padding:8px 12px; margin:8px 0; background:var(--card-bg);">
+        <strong>方法A: Excelファイルから取り込み</strong>
+        <p class="hint" style="margin:4px 0;">「番号」「氏名（名前）」列のあるファイルを自動検出して取り込みます。</p>
+        <div style="margin-top:6px;"><input type="file" id="wiz-stu-excel-file" accept=".xlsx,.xls"></div>
+      </div>
+      <div style="border-left:3px solid var(--primary); padding:8px 12px; margin:8px 0; background:var(--card-bg);">
+        <strong>方法B: 氏名をコピー&貼り付け（番号は自動付番）</strong>
+        <p class="hint" style="margin:4px 0;">下の「氏名」枠に1人ずつ入力します。番号は <strong>1から順に</strong> 自動で振られます。</p>
+        <div style="display:flex; gap:8px; margin: 6px 0; flex-wrap:wrap; align-items:center;">
+          <button id="wiz-stu-paste-clipboard" class="primary">📋 貼り付け</button>
+          <span class="hint">クリップボードの内容を一括で貼り付け</span>
+          <button id="wiz-stu-clear-all">一括削除</button>
+        </div>
+        <div style="font-weight:bold; padding:6px 10px; background:var(--table-head); border:1px solid var(--border); border-bottom:none; border-radius:4px 4px 0 0; font-size:13px;">氏名</div>
+        <div id="wiz-stu-cells" class="name-cell-list"></div>
+        <div style="margin-top:10px;">
+          <button id="wiz-stu-cells-confirm" class="primary">この内容で登録</button>
+        </div>
+      </div>
       <div id="wiz-stu-preview"></div>
     `;
+    // 方法A: Excelファイル
     document.getElementById('wiz-stu-excel-file').addEventListener('change', (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      // 既存のparseロジックを使う
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
@@ -680,84 +714,371 @@ function renderWizardStep4(c) {
             if (found) { result = { rows, ...found }; usedSheet = name; break; }
           }
           if (!result) { toast('「番号」と「氏名」列が見つかりません', 'error'); return; }
-          const { rows, headerRow, noIdx, nameIdx } = result;
           const students = [];
-          for (let i = headerRow + 1; i < rows.length; i++) {
-            const r = rows[i] || [];
-            const noNum = parseInt(r[noIdx]);
-            const nameVal = String(r[nameIdx] || '').trim();
+          for (let i = result.headerRow + 1; i < result.rows.length; i++) {
+            const r = result.rows[i] || [];
+            const noNum = parseInt(r[result.noIdx]);
+            const nameVal = String(r[result.nameIdx] || '').trim();
             if (isNaN(noNum) || !nameVal) continue;
             students.push({ no: noNum, name: nameVal });
           }
           if (students.length === 0) { toast('生徒データが見つかりません', 'error'); return; }
           students.sort((a, b) => a.no - b.no);
-          let prevHtml = `<div class="archive-info-box">「${escapeHtml(usedSheet)}」シートから ${students.length}名検出。</div>`;
-          prevHtml += '<div style="max-height:200px; overflow:auto; border:1px solid var(--border); border-radius:4px;"><table><thead><tr><th>No.</th><th>氏名</th></tr></thead><tbody>';
-          for (const s of students) prevHtml += `<tr><td>${s.no}</td><td>${escapeHtml(s.name)}</td></tr>`;
-          prevHtml += '</tbody></table></div>';
-          prevHtml += `<div style="margin-top:8px;"><button id="wiz-stu-confirm" class="primary">この内容で登録</button></div>`;
-          document.getElementById('wiz-stu-preview').innerHTML = prevHtml;
-          document.getElementById('wiz-stu-confirm').onclick = () => {
-            if (state.students.length > 0 && !confirm(`既存${state.students.length}名を上書きして${students.length}名を登録しますか？`)) return;
-            state.students = students;
-            saveAll();
-            updateClassInfoBar();
-            wizardApplied.step4 = true;
-            toast(`${students.length}名を登録しました`, 'success');
-            renderYearUpdate();
-          };
+          showWizStuPreview(students, `「${usedSheet}」シート`);
         } catch (err) { toast('Excel読込失敗: ' + err.message, 'error'); }
       };
       reader.readAsArrayBuffer(f);
     });
+
+    // ===== 方法B: セル方式（1人1セル、自動拡張） =====
+    const cellsContainer = document.getElementById('wiz-stu-cells');
+
+    function addCellElement(initialValue = '') {
+      const idx = cellsContainer.querySelectorAll('input.name-cell').length;
+      const row = document.createElement('div');
+      row.className = 'name-cell-row';
+      const noSpan = document.createElement('span');
+      noSpan.className = 'cell-no';
+      noSpan.textContent = String(idx + 1);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'name-cell';
+      input.placeholder = '－';
+      input.value = initialValue;
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'cell-del';
+      delBtn.title = 'この行を削除';
+      delBtn.textContent = '×';
+      row.appendChild(noSpan);
+      row.appendChild(input);
+      row.appendChild(delBtn);
+      cellsContainer.appendChild(row);
+
+      input.addEventListener('input', () => onCellInput(input));
+      input.addEventListener('keydown', (e) => onCellKeydown(e, input));
+      input.addEventListener('paste', (e) => onCellPaste(e, input));
+      // ×ボタン: その行のみ削除（イベントの伝播を完全に止める）
+      delBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        row.remove();
+        // 全部削除されたら空セルを1つ追加
+        if (cellsContainer.querySelectorAll('input.name-cell').length === 0) {
+          addCellElement();
+        } else {
+          ensureTrailingEmpty();
+        }
+        renumberCells();
+      });
+      return input;
+    }
+
+    function getAllCellInputs() {
+      return Array.from(cellsContainer.querySelectorAll('input.name-cell'));
+    }
+    function renumberCells() {
+      const rows = cellsContainer.querySelectorAll('.name-cell-row');
+      rows.forEach((r, i) => {
+        const span = r.querySelector('.cell-no');
+        if (span) span.textContent = String(i + 1);
+      });
+    }
+    function ensureTrailingEmpty() {
+      const inputs = getAllCellInputs();
+      const last = inputs[inputs.length - 1];
+      if (!last || last.value.trim() !== '') addCellElement();
+    }
+
+    function onCellInput(input) {
+      const inputs = getAllCellInputs();
+      const idx = inputs.indexOf(input);
+      // 最終セルに値が入ったら新しい空セルを追加
+      if (idx === inputs.length - 1 && input.value.trim() !== '') addCellElement();
+    }
+    function onCellKeydown(e, input) {
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        ensureTrailingEmpty();
+        const inputs = getAllCellInputs();
+        const idx = inputs.indexOf(input);
+        const next = inputs[idx + 1];
+        if (next) next.focus();
+      }
+    }
+    function onCellPaste(e, input) {
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (!text) return;
+      const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean);
+      // 1行のみなら通常のペースト動作に任せる
+      if (lines.length <= 1) return;
+      e.preventDefault();
+      const inputs = getAllCellInputs();
+      const startIdx = inputs.indexOf(input);
+      // タブ区切り対応(数字でない最初のセルを氏名として)
+      const extractName = (line) => {
+        if (line.includes('\t')) {
+          const cells = line.split('\t').map(c => c.trim()).filter(Boolean);
+          const found = cells.find(c => !/^\d+$/.test(c));
+          return found || '';
+        }
+        return line;
+      };
+      for (let i = 0; i < lines.length; i++) {
+        const name = extractName(lines[i]);
+        if (!name) continue;
+        const targetIdx = startIdx + i;
+        const all = getAllCellInputs();
+        if (targetIdx >= all.length) addCellElement();
+        const final = getAllCellInputs();
+        final[targetIdx].value = name;
+      }
+      ensureTrailingEmpty();
+    }
+
+    // 「貼り付け」ボタン: クリップボードから一括取得して全セルを置き換え
+    document.getElementById('wiz-stu-paste-clipboard').onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.readText) {
+          toast('このブラウザではクリップボード自動取得不可。最初の枠で直接貼り付けてください', 'error');
+          return;
+        }
+        const text = await navigator.clipboard.readText();
+        if (!text || !text.trim()) { toast('クリップボードが空です', 'error'); return; }
+        const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) { toast('有効な氏名が見つかりません', 'error'); return; }
+        const extractName = (line) => {
+          if (line.includes('\t')) {
+            const cells = line.split('\t').map(c => c.trim()).filter(Boolean);
+            const found = cells.find(c => !/^\d+$/.test(c));
+            return found || '';
+          }
+          return line;
+        };
+        cellsContainer.innerHTML = '';
+        for (const line of lines) {
+          const name = extractName(line);
+          if (name) addCellElement(name);
+        }
+        ensureTrailingEmpty();
+        toast(`${lines.length}件を貼り付けました`, 'success');
+      } catch (err) {
+        console.warn('Clipboard error:', err);
+        toast('クリップボード読込が拒否されました。最初の枠で直接貼り付けてください', 'error');
+      }
+    };
+
+    // 「一括削除」ボタン: 全セルを空に戻す
+    document.getElementById('wiz-stu-clear-all').onclick = (e) => {
+      e.stopPropagation();
+      const inputs = getAllCellInputs();
+      const hasInput = inputs.some(i => i.value.trim() !== '');
+      if (hasInput && !confirm('入力済みの氏名をすべて削除しますか？')) return;
+      cellsContainer.innerHTML = '';
+      addCellElement();
+    };
+
+    // 「この内容で登録」ボタン: 入力されている全氏名を登録
+    document.getElementById('wiz-stu-cells-confirm').onclick = (e) => {
+      e.stopPropagation();
+      const filled = getAllCellInputs().map(i => i.value.trim()).filter(Boolean);
+      if (filled.length === 0) { toast('氏名が入力されていません', 'error'); return; }
+      const students = filled.map((name, i) => ({ no: i + 1, name }));
+      if (state.students.length > 0 && !confirm(`既存${state.students.length}名を上書きして${students.length}名を登録しますか？`)) return;
+      state.students = students;
+      saveAll();
+      updateClassInfoBar();
+      wizardApplied.step4 = true;
+      toast(`${students.length}名を登録しました`, 'success');
+      renderYearUpdate();
+    };
+
+    // 初期化: 1つ目の空セルを表示
+    cellsContainer.innerHTML = '';
+    addCellElement();
+
+    // ===== 共通プレビュー表示 (Excelファイル取り込み用) =====
+    function showWizStuPreview(students, sourceLabel) {
+      let prevHtml = `<div class="archive-info-box">${escapeHtml(sourceLabel)}から ${students.length}名検出。</div>`;
+      prevHtml += '<div style="max-height:240px; overflow:auto; border:1px solid var(--border); border-radius:4px;"><table><thead><tr><th>No.</th><th>氏名</th></tr></thead><tbody>';
+      for (const s of students) prevHtml += `<tr><td>${s.no}</td><td>${escapeHtml(s.name)}</td></tr>`;
+      prevHtml += '</tbody></table></div>';
+      prevHtml += `<div style="margin-top:8px;"><button id="wiz-stu-confirm" class="primary">この内容で登録</button></div>`;
+      document.getElementById('wiz-stu-preview').innerHTML = prevHtml;
+      document.getElementById('wiz-stu-confirm').onclick = () => {
+        if (state.students.length > 0 && !confirm(`既存${state.students.length}名を上書きして${students.length}名を登録しますか？`)) return;
+        state.students = students;
+        saveAll();
+        updateClassInfoBar();
+        wizardApplied.step4 = true;
+        toast(`${students.length}名を登録しました`, 'success');
+        renderYearUpdate();
+      };
+    }
+  }
+
+}
+
+// Step 5: 時間割（プルダウン式・教科リスト管理）
+function renderWizardStep5(c) {
+  const grade = currentGrade();
+  // 初回入場時に時間割をクリア（セッション内一度だけ）
+  if (!wizardSession.step5InitDone) {
+    for (const wd of WEEKDAYS) state.timetable[wd] = [];
+    if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+    wizardSession.step5InitDone = true;
+    saveAll();
+  }
+  c.innerHTML = `
+    <h3>5. 時間割の登録 ${wizardApplied.step5 ? '<span class="wizard-applied">✓ 登録済</span>' : ''}</h3>
+    <div class="wizard-current-info">
+      対象学年: <strong>${grade}年</strong> / 標準時限数:
+      <select id="wiz-tt-periods" style="margin-left:4px;">
+        <option value="6" ${state.config.periods===6?'selected':''}>6時限</option>
+        <option value="7" ${state.config.periods===7?'selected':''}>7時限</option>
+      </select>
+    </div>
+    <p>① 教科リスト（プルダウン候補）を編集できます。<strong>${grade}年</strong>用に保存され、次年度に同じ学年を扱う際に再利用されます。<br>
+    ② 下の時間割表で各時限の教科をプルダウンから選択してください。</p>
+
+    <div class="card" style="background:var(--pill-bg);">
+      <h4 style="margin-top:0;">教科リスト（${grade}年用）</h4>
+      <div class="subject-pills" id="wiz-subject-pills"></div>
+      <div class="subject-add-row">
+        <input type="text" id="wiz-subject-add-input" placeholder="新しい教科を入力 (例: 国語)">
+        <button id="wiz-subject-add-btn">＋追加</button>
+        <button id="wiz-subject-clear-all" class="danger">一括削除</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0;">時間割（曜日横・時限縦）</h4>
+      <div id="wiz-tt-grid-area"></div>
+      <p class="hint">空欄の時限は授業なし扱い。プルダウンに教科がない場合は上の「教科リスト」に追加してください。</p>
+    </div>
+  `;
+
+  renderSubjectPills();
+  renderWizTimetable();
+
+  // 標準時限数の変更
+  document.getElementById('wiz-tt-periods').onchange = (e) => {
+    state.config.periods = parseInt(e.target.value);
+    saveAll();
+    renderWizTimetable();
+  };
+
+  document.getElementById('wiz-subject-add-btn').onclick = () => addSubjectFromInput();
+  document.getElementById('wiz-subject-add-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      addSubjectFromInput();
+    }
+  });
+  document.getElementById('wiz-subject-clear-all').onclick = () => {
+    if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+    const cnt = state.subjectsByGrade[grade].length;
+    if (cnt === 0) { toast('教科リストは既に空です', 'error'); return; }
+    if (!confirm(`${grade}年の教科リスト ${cnt}件 をすべて削除しますか？\n（時間割で既に使用中のセル値は残ります）`)) return;
+    state.subjectsByGrade[grade] = [];
+    saveAll();
+    renderSubjectPills();
+    renderWizTimetable();
+    toast('教科リストを一括削除しました', 'success');
+  };
+
+  // 「登録」ボタンで完了マークを付ける(時間割は変更時に既に保存されている)
+  wizardCommit = () => {
+    wizardApplied.step5 = true;
+    toast('時間割を登録しました', 'success');
+    return true;
+  };
+
+  function addSubjectFromInput() {
+    const inp = document.getElementById('wiz-subject-add-input');
+    const v = (inp.value || '').trim();
+    if (!v) return;
+    if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+    if (!state.subjectsByGrade[grade].includes(v)) {
+      state.subjectsByGrade[grade].push(v); // 入力順を保持(ソートしない)
+      saveAll();
+    }
+    inp.value = '';
+    renderSubjectPills();
+    renderWizTimetable();
+    inp.focus();
+  }
+
+  function renderSubjectPills() {
+    const div = document.getElementById('wiz-subject-pills');
+    const subs = state.subjectsByGrade[grade] || [];
+    if (subs.length === 0) {
+      div.innerHTML = '<span class="hint">まだ教科が登録されていません。下のフィールドから追加してください。</span>';
+      return;
+    }
+    div.innerHTML = subs.map((s, i) => `
+      <span class="subject-pill">${escapeHtml(s)}<button class="delete-btn" data-i="${i}" title="削除">×</button></span>
+    `).join('');
+    div.querySelectorAll('.delete-btn').forEach(b => {
+      b.onclick = () => {
+        const i = parseInt(b.dataset.i);
+        const removed = subs[i];
+        if (!confirm(`教科「${removed}」を削除しますか？\n（時間割で使用中の場合、そのセルは空欄に変わります）`)) return;
+        state.subjectsByGrade[grade].splice(i, 1);
+        // 時間割からも削除（同じ教科を空欄に）
+        for (const wd of WEEKDAYS) {
+          for (let p = 0; p < (state.timetable[wd] || []).length; p++) {
+            if (state.timetable[wd][p] === removed) state.timetable[wd][p] = '';
+          }
+        }
+        saveAll();
+        renderSubjectPills();
+        renderWizTimetable();
+      };
+    });
+  }
+
+  function renderWizTimetable() {
+    const div = document.getElementById('wiz-tt-grid-area');
+    const periods = state.config.periods;
+    for (const wd of WEEKDAYS) {
+      if (!state.timetable[wd]) state.timetable[wd] = [];
+      state.timetable[wd].length = periods;
+    }
+    const subs = state.subjectsByGrade[grade] || [];
+    let cells = '<div class="cell head">時限＼曜日</div>';
+    for (const wd of WEEKDAYS) cells += `<div class="cell head">${wd}</div>`;
+    for (let p = 0; p < periods; p++) {
+      cells += `<div class="cell head">${p+1}限</div>`;
+      for (const wd of WEEKDAYS) {
+        const v = state.timetable[wd][p] || '';
+        const opts = buildSubjectOptions(v, subs);
+        cells += `<div class="cell"><select data-wd="${wd}" data-p="${p}">${opts}</select></div>`;
+      }
+    }
+    div.innerHTML = `<div class="wiz-tt-grid" style="grid-template-columns: 80px repeat(${WEEKDAYS.length}, 1fr);">${cells}</div>`;
+    div.querySelectorAll('select').forEach(sel => {
+      sel.onchange = (e) => {
+        state.timetable[e.target.dataset.wd][parseInt(e.target.dataset.p)] = e.target.value;
+        saveAll();
+      };
+    });
   }
 }
 
-// Step 5: 時間割
-function renderWizardStep5(c) {
-  // 教科一覧
-  const subjects = new Set();
-  for (const wd of WEEKDAYS) for (const s of (state.timetable[wd] || [])) if (s && s.trim()) subjects.add(s.trim());
-  const subjectSummary = subjects.size === 0 ? '（未登録）' : `${subjects.size}教科`;
-  c.innerHTML = `
-    <h3>5. 時間割の更新 ${wizardApplied.step5 ? '<span class="wizard-applied">✓ 更新済</span>' : ''}</h3>
-    <div class="wizard-current-info">
-      現在の時間割: <strong>${subjectSummary}</strong> / 標準時限数: <strong>${state.config.periods}</strong>
-    </div>
-    <p>下記からひとつ選んでください。詳細編集は「初期設定」タブから可能です。</p>
-    <div class="wizard-choice-block" id="wiz-tt-keep">
-      <h4>① 現在の時間割を維持する</h4>
-      <p class="hint" style="margin:0;">同じ教科担当が続く場合など。「初期設定」タブから個別編集も可能です。</p>
-    </div>
-    <div class="wizard-choice-block danger" id="wiz-tt-clear">
-      <h4>② すべてクリアして空から作成する</h4>
-      <p class="hint" style="margin:0;">時間割を全削除します。「初期設定」タブの時間割欄に新規入力してください。</p>
-    </div>
-    <div class="wizard-choice-block" id="wiz-tt-edit">
-      <h4>③ 「初期設定」タブで編集する</h4>
-      <p class="hint" style="margin:0;">クリックすると初期設定タブに移動します（途中で「年度更新」に戻れます）。</p>
-    </div>
-  `;
-  document.getElementById('wiz-tt-keep').onclick = () => {
-    wizardApplied.step5 = true;
-    toast('時間割を維持します', 'success');
-    renderYearUpdate();
-  };
-  document.getElementById('wiz-tt-clear').onclick = () => {
-    if (!confirm('時間割をすべてクリアしますか？')) return;
-    for (const wd of WEEKDAYS) state.timetable[wd] = [];
-    saveAll();
-    wizardApplied.step5 = true;
-    toast('時間割をクリアしました', 'success');
-    renderYearUpdate();
-  };
-  document.getElementById('wiz-tt-edit').onclick = () => {
-    showView('setup');
-    setTimeout(() => {
-      const tt = document.getElementById('timetable-area');
-      if (tt) tt.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-  };
+function buildSubjectOptions(currentValue, subjects) {
+  // 教科リストの配列順をそのまま保持(ソートしない)
+  const list = (subjects || []).slice();
+  const trimmed = currentValue && currentValue.trim();
+  // 現在値が教科リストに存在しない場合のみ末尾に追加(その教科を選択肢として残すため)
+  if (trimmed && !list.includes(trimmed)) list.push(trimmed);
+  let html = `<option value="" ${!currentValue?'selected':''}>－</option>`;
+  for (const s of list) {
+    html += `<option value="${escapeHtml(s)}" ${s===currentValue?'selected':''}>${escapeHtml(s)}</option>`;
+  }
+  return html;
 }
 
 // Step 6: カレンダー
@@ -946,6 +1267,12 @@ function periodStatusForDay(att, periodCount) {
       else if (i+1 === p) result[i] = during ? 'early' : 'absent';
       else result[i] = 'absent';
     }
+  } else if (status === 'infirmary') {
+    // 保健室は指定された複数時限のみ「保健室」扱い、他は出席
+    const periods = Array.isArray(att.periods) ? att.periods : [];
+    for (let i = 0; i < periodCount; i++) {
+      if (periods.includes(i + 1)) result[i] = 'infirmary';
+    }
   }
   return result;
 }
@@ -1054,8 +1381,20 @@ function updateUndoUI() {
 
 // 現在のビュー名を覚えて再描画
 let currentViewName = 'dashboard';
+function renderViewContent(name) {
+  if (name === 'dashboard') renderDashboard();
+  else if (name === 'daily') renderDaily();
+  else if (name === 'calendar') renderCalendarView();
+  else if (name === 'monthly') renderMonthly();
+  else if (name === 'subject') renderSubject();
+  else if (name === 'setup') renderSetup();
+  else if (name === 'rules') renderRules();
+  else if (name === 'data') renderDataView();
+  else if (name === 'yearupdate') renderYearUpdate();
+}
 function refreshCurrentView() {
-  showView(currentViewName);
+  // ビュー切替なしで内容のみ再描画 → スクロール位置を維持
+  renderViewContent(currentViewName);
 }
 
 // =====================================================
@@ -1306,6 +1645,7 @@ function renderStudentCardHtml(stu, a, s) {
   let stat = '';
   if (s === 'tardy' && a) stat = `${a.period||1}限${a.during?'途中':'前'}`;
   else if (s === 'early' && a) stat = `${a.period||1}限${a.during?'途中':'前'}`;
+  else if (s === 'infirmary' && a) stat = a.periods && a.periods.length ? `保健室(${a.periods.join(',')}限)` : '保健室';
   else if (s !== 'present') stat = STATUS_LABEL[s];
   const icon = STATUS_ICON[s] || '?';
   const isBulkSelected = bulkSelected.has(String(stu.no)) || bulkSelected.has(stu.no);
@@ -1438,7 +1778,16 @@ function computeSubjectStatistics() {
     const sched = state.overrides[ds].schedule;
     if (Array.isArray(sched)) for (const s of sched) if (s && s.trim()) subjects.add(s.trim());
   }
-  const subjectArr = [...subjects].sort();
+  // 教科リスト(state.subjectsByGrade)の入力順を優先。リスト外の教科は末尾に追加
+  const grade = currentGrade();
+  const orderedList = (state.subjectsByGrade && state.subjectsByGrade[grade]) || [];
+  const subjectArr = [];
+  for (const s of orderedList) {
+    if (subjects.has(s)) subjectArr.push(s);
+  }
+  for (const s of subjects) {
+    if (!subjectArr.includes(s)) subjectArr.push(s);
+  }
   const { startDates, endDates } = detectTermBoundaries();
   const terms = [];
   for (const ed of endDates) {
@@ -1490,7 +1839,7 @@ function computeSubjectStatistics() {
         const subj = (sched[i] || '').trim();
         if (!subj || !stat[subj]) continue;
         const ps = perPeriod[i];
-        if (ps === 'absent') stat[subj].absences++;
+        if (ps === 'absent' || ps === 'infirmary') stat[subj].absences++;
         else if (ps === 'suspended' || ps === 'mourning' || ps === 'abroad' || ps === 'leave') stat[subj].total--;
       }
     }
@@ -1544,6 +1893,7 @@ function renderAttendanceListArea(dateStr, container) {
       statusOpts += `<option value="${t.code}" ${s===t.code?'selected':''}>${t.label}</option>`;
     }
     const showPeriod = (s === 'tardy' || s === 'early') && periodCount > 0;
+    const showInfirmary = s === 'infirmary' && periodCount > 0;
     let periodCell = '<span class="hint">－</span>';
     let duringCell = '<span class="hint">－</span>';
     if (showPeriod) {
@@ -1556,6 +1906,14 @@ function renderAttendanceListArea(dateStr, container) {
         <option value="1" ${during?'selected':''}>授業中</option>
         <option value="0" ${!during?'selected':''}>授業前</option>
       </select>`;
+    } else if (showInfirmary) {
+      const infPeriods = (a && Array.isArray(a.periods)) ? a.periods : [];
+      let pHtml = '';
+      for (let i = 1; i <= periodCount; i++) {
+        pHtml += `<label><input type="checkbox" data-no="${stu.no}" data-p="${i}" data-field="infirmary-period" ${infPeriods.includes(i)?'checked':''}>${i}</label>`;
+      }
+      periodCell = `<div class="period-pills mini">${pHtml}</div>`;
+      duringCell = '<span class="hint">－</span>';
     }
     rows += `
       <tr class="daily-row s-${s}" data-no="${stu.no}" data-name="${escapeHtml(stu.name)}">
@@ -1600,6 +1958,13 @@ function renderAttendanceListArea(dateStr, container) {
       const no = e.target.dataset.no;
       const field = e.target.dataset.field;
       handleListEdit(dateStr, no, field, e.target.value);
+    });
+  });
+  container.querySelectorAll('.daily-row input[type="checkbox"][data-field="infirmary-period"]').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const no = e.target.dataset.no;
+      const period = parseInt(e.target.dataset.p);
+      handleInfirmaryToggle(dateStr, no, period, e.target.checked);
     });
   });
   container.querySelectorAll('.daily-row .col-name').forEach(td => {
@@ -1648,6 +2013,11 @@ function handleListEdit(dateStr, no, field, value) {
         period: cur.period || 1,
         during: cur.during !== false
       };
+    } else if (value === 'infirmary') {
+      state.attendance[dateStr][no] = {
+        status: 'infirmary',
+        periods: Array.isArray(cur.periods) && cur.periods.length ? cur.periods.slice() : [1]
+      };
     } else {
       state.attendance[dateStr][no] = { status: value };
     }
@@ -1659,6 +2029,32 @@ function handleListEdit(dateStr, no, field, value) {
     if (cur.status === 'tardy' || cur.status === 'early') {
       state.attendance[dateStr][no] = { ...cur, during: value === '1' };
     }
+  }
+  if (Object.keys(state.attendance[dateStr]).length === 0) delete state.attendance[dateStr];
+  saveAll();
+  refreshCurrentView();
+}
+
+function handleInfirmaryToggle(dateStr, no, period, checked) {
+  const stu = state.students.find(s => String(s.no) === String(no));
+  const stuName = stu ? stu.name : '';
+  if (!state.attendance[dateStr]) state.attendance[dateStr] = {};
+  let cur = state.attendance[dateStr][no];
+  if (!cur || cur.status !== 'infirmary') {
+    cur = { status: 'infirmary', periods: [] };
+  }
+  if (!Array.isArray(cur.periods)) cur.periods = [];
+  pushUndo(`No.${no} ${stuName} 保健室${period}限`, dateStr);
+  if (checked) {
+    if (!cur.periods.includes(period)) cur.periods.push(period);
+  } else {
+    cur.periods = cur.periods.filter(p => p !== period);
+  }
+  cur.periods.sort((a,b) => a-b);
+  if (cur.periods.length === 0) {
+    delete state.attendance[dateStr][no];
+  } else {
+    state.attendance[dateStr][no] = cur;
   }
   if (Object.keys(state.attendance[dateStr]).length === 0) delete state.attendance[dateStr];
   saveAll();
@@ -1683,6 +2079,7 @@ function openStudentModal(stuNo, dateStr) {
     status: att.status || 'present',
     period: att.period || 1,
     during: att.during !== false,
+    periods: Array.isArray(att.periods) ? att.periods.slice() : [], // 保健室用
     noClassDay: cls.kind === 'noclass',
     periodCount: periodCount || 0,
   };
@@ -1746,6 +2143,18 @@ function renderModalBody() {
         <p class="hint" style="margin:6px 0 0;">${ctx.during?helpOn:helpOff}</p>
       </div>
     `;
+  } else if (ctx.status === 'infirmary' && ctx.periodCount > 0) {
+    let pills = '';
+    for (let i = 1; i <= ctx.periodCount; i++) {
+      pills += `<div class="period-pill ${ctx.periods.includes(i)?'selected':''}" data-period="${i}" data-multi="1">${i}限</div>`;
+    }
+    periodArea = `
+      <div class="period-area">
+        <div><strong>保健室に行った時限を選択（複数選択可）:</strong></div>
+        <div class="period-pills">${pills}</div>
+        <p class="hint" style="margin:6px 0 0;">選択した時限の授業のみ欠席扱い。全体の欠席数にはカウントされません。</p>
+      </div>
+    `;
   }
 
   document.getElementById('modal-body').innerHTML = `
@@ -1759,7 +2168,18 @@ function renderModalBody() {
     p.onclick = () => { modalCtx.status = p.dataset.status; renderModalBody(); };
   });
   document.querySelectorAll('#student-modal .period-pill').forEach(p => {
-    p.onclick = () => { modalCtx.period = parseInt(p.dataset.period); renderModalBody(); };
+    p.onclick = () => {
+      const period = parseInt(p.dataset.period);
+      if (p.dataset.multi === '1') {
+        const idx = modalCtx.periods.indexOf(period);
+        if (idx >= 0) modalCtx.periods.splice(idx, 1);
+        else modalCtx.periods.push(period);
+        modalCtx.periods.sort((a,b) => a-b);
+      } else {
+        modalCtx.period = period;
+      }
+      renderModalBody();
+    };
   });
   document.querySelectorAll('#student-modal input[name="during"]').forEach(r => {
     r.onchange = (e) => { modalCtx.during = (e.target.value === '1'); renderModalBody(); };
@@ -1778,6 +2198,12 @@ function saveStudentModal() {
     delete state.attendance[ctx.dateStr][ctx.stuNo];
   } else if (ctx.status === 'tardy' || ctx.status === 'early') {
     state.attendance[ctx.dateStr][ctx.stuNo] = { status: ctx.status, period: ctx.period, during: ctx.during };
+  } else if (ctx.status === 'infirmary') {
+    if (!ctx.periods || ctx.periods.length === 0) {
+      // 時限が一つも選択されていない場合は1限をデフォルトに
+      ctx.periods = [1];
+    }
+    state.attendance[ctx.dateStr][ctx.stuNo] = { status: 'infirmary', periods: ctx.periods.slice().sort((a,b)=>a-b) };
   } else {
     state.attendance[ctx.dateStr][ctx.stuNo] = { status: ctx.status };
   }
@@ -1801,6 +2227,8 @@ function applyYesterdayToModal() {
   if (a.status === 'tardy' || a.status === 'early') {
     ctx.period = a.period || 1;
     ctx.during = a.during !== false;
+  } else if (a.status === 'infirmary') {
+    ctx.periods = (a.periods || []).slice();
   }
   renderModalBody();
 }
@@ -1945,6 +2373,7 @@ function drawCalendar() {
         let label;
         if (a.status === 'tardy') label = `${stu.name}(遅${a.period||''})`;
         else if (a.status === 'early') label = `${stu.name}(早${a.period||''})`;
+        else if (a.status === 'infirmary') label = `${stu.name}(保${a.periods?a.periods.join(','):''})`;
         else label = `${stu.name}(${STATUS_LABEL[a.status]})`;
         stuList += `<span class="${sCls}">${escapeHtml(label)}</span>`;
       }
@@ -1990,7 +2419,7 @@ function refreshMonthlyTable() {
     if (cls.kind !== 'holiday') classDayCount++;
   }
   const stats = state.students.map(stu => {
-    const counts = { suspended:0, mourning:0, official:0, abroad:0, absent:0, tardy:0, early:0, leave:0 };
+    const counts = { suspended:0, mourning:0, official:0, abroad:0, absent:0, tardy:0, early:0, leave:0, infirmary:0 };
     for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
       const ds = ymd(d);
       const cls = classifyDate(ds);
@@ -2012,6 +2441,7 @@ function refreshMonthlyTable() {
     { key:'tardy',     label:'遅刻' },
     { key:'early',     label:'早退' },
     { key:'leave',     label:'休学' },
+    { key:'infirmary', label:'保健室' },
   ];
   let head = '<tr><th>No.</th><th>氏名</th>';
   for (const c of cols) head += `<th>${c.label}<button class="copy-btn small" data-col="${c.key}">列をコピー</button></th>`;
@@ -2107,10 +2537,32 @@ function renderSetup() {
   document.getElementById('setup-periods').value = state.config.periods;
 
   document.getElementById('setup-year').onchange = (e) => { state.config.year = parseInt(e.target.value); saveAll(); updateClassInfoBar(); };
-  document.getElementById('setup-grade').onchange = (e) => { state.config.grade = e.target.value; saveAll(); updateClassInfoBar(); };
+  document.getElementById('setup-grade').onchange = (e) => {
+    state.config.grade = e.target.value; saveAll(); updateClassInfoBar();
+    buildTimetable(); // 学年が変わると教科リストも変わるためプルダウンを再生成
+    if (!document.getElementById('setup-subjects-area').classList.contains('hidden')) {
+      renderSetupSubjectsManager();
+    }
+  };
   document.getElementById('setup-class-letter').onchange = (e) => { state.config.classLetter = e.target.value; saveAll(); updateClassInfoBar(); };
   document.getElementById('setup-saturday').onchange = (e) => { state.config.saturdayClass = e.target.checked; saveAll(); };
   document.getElementById('setup-periods').onchange = (e) => { state.config.periods = parseInt(e.target.value); saveAll(); buildTimetable(); };
+  // 教科リスト切替トグル
+  const subjToggle = document.getElementById('setup-subjects-toggle');
+  const subjArea = document.getElementById('setup-subjects-area');
+  // タブ切替時は閉じた状態に戻す
+  subjArea.classList.add('hidden');
+  subjToggle.textContent = '📚 教科リストを変更する';
+  subjToggle.onclick = () => {
+    if (subjArea.classList.contains('hidden')) {
+      subjArea.classList.remove('hidden');
+      renderSetupSubjectsManager();
+      subjToggle.textContent = '📚 教科リストを閉じる';
+    } else {
+      subjArea.classList.add('hidden');
+      subjToggle.textContent = '📚 教科リストを変更する';
+    }
+  };
   renderStudents();
   buildTimetable();
   refreshCalendarStatus();
@@ -2145,6 +2597,14 @@ function renderStudents() {
 function buildTimetable() {
   const div = document.getElementById('timetable-area');
   const periods = state.config.periods;
+  const grade = currentGrade();
+  // ※ subjectsByGrade はオブジェクト ({'1':[], '2':[], '3':[]}) なので Array.isArray を使ってはいけない
+  if (!state.subjectsByGrade || typeof state.subjectsByGrade !== 'object') {
+    state.subjectsByGrade = { '1': [], '2': [], '3': [] };
+  }
+  if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+  const subs = state.subjectsByGrade[grade];
+
   for (const wd of WEEKDAYS) {
     if (!state.timetable[wd]) state.timetable[wd] = [];
     state.timetable[wd].length = periods;
@@ -2155,14 +2615,114 @@ function buildTimetable() {
     cells += `<div class="cell head">${p+1}限</div>`;
     for (const wd of WEEKDAYS) {
       const v = state.timetable[wd][p] || '';
-      cells += `<div class="cell"><input type="text" data-wd="${wd}" data-p="${p}" value="${escapeHtml(v)}"></div>`;
+      const opts = buildSubjectOptions(v, subs);
+      cells += `<div class="cell"><select data-wd="${wd}" data-p="${p}">${opts}</select></div>`;
     }
   }
   div.innerHTML = `<div class="tt-grid" style="grid-template-columns: 80px repeat(${WEEKDAYS.length}, 1fr);">${cells}</div>`;
-  div.querySelectorAll('input').forEach(inp => {
-    inp.onchange = (e) => {
-      state.timetable[e.target.dataset.wd][parseInt(e.target.dataset.p)] = e.target.value.trim();
+  div.querySelectorAll('select').forEach(sel => {
+    sel.onchange = (e) => {
+      state.timetable[e.target.dataset.wd][parseInt(e.target.dataset.p)] = e.target.value;
       saveAll();
+    };
+    // Enterキーで同じ曜日の次の時限に移動
+    sel.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        const wd = e.target.dataset.wd;
+        const p = parseInt(e.target.dataset.p);
+        const next = div.querySelector(`select[data-wd="${wd}"][data-p="${p+1}"]`);
+        if (next) next.focus();
+      }
+    });
+  });
+}
+
+// 登録情報タブ: 教科リスト管理(トグル表示)
+function renderSetupSubjectsManager() {
+  const area = document.getElementById('setup-subjects-area');
+  const grade = currentGrade();
+  if (!state.subjectsByGrade || typeof state.subjectsByGrade !== 'object') {
+    state.subjectsByGrade = { '1': [], '2': [], '3': [] };
+  }
+  if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+  area.innerHTML = `
+    <div class="card" style="background:var(--pill-bg); margin-top:8px;">
+      <h4 style="margin-top:0;">教科リスト（${grade}年用）</h4>
+      <p class="hint">時間割のプルダウンに表示される教科を管理します。学年別に保存されます。</p>
+      <div class="subject-pills" id="setup-subject-pills"></div>
+      <div class="subject-add-row">
+        <input type="text" id="setup-subject-add-input" placeholder="新しい教科を入力 (例: 国語)">
+        <button id="setup-subject-add-btn">＋追加</button>
+        <button id="setup-subject-clear-all" class="danger">一括削除</button>
+      </div>
+    </div>
+  `;
+  renderSetupSubjectPills();
+  document.getElementById('setup-subject-add-btn').onclick = addSetupSubject;
+  document.getElementById('setup-subject-add-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      addSetupSubject();
+    }
+  });
+  document.getElementById('setup-subject-clear-all').onclick = () => {
+    if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+    const cnt = state.subjectsByGrade[grade].length;
+    if (cnt === 0) { toast('教科リストは既に空です', 'error'); return; }
+    if (!confirm(`${grade}年の教科リスト ${cnt}件 をすべて削除しますか？\n（時間割で既に使用中のセル値は残ります）`)) return;
+    state.subjectsByGrade[grade] = [];
+    saveAll();
+    renderSetupSubjectPills();
+    buildTimetable();
+    toast('教科リストを一括削除しました', 'success');
+  };
+}
+function addSetupSubject() {
+  const inp = document.getElementById('setup-subject-add-input');
+  if (!inp) return;
+  const v = (inp.value || '').trim();
+  if (!v) return;
+  const grade = currentGrade();
+  if (!state.subjectsByGrade || typeof state.subjectsByGrade !== 'object') {
+    state.subjectsByGrade = { '1': [], '2': [], '3': [] };
+  }
+  if (!Array.isArray(state.subjectsByGrade[grade])) state.subjectsByGrade[grade] = [];
+  if (!state.subjectsByGrade[grade].includes(v)) {
+    state.subjectsByGrade[grade].push(v); // 入力順を保持(ソートしない)
+    saveAll();
+  }
+  inp.value = '';
+  renderSetupSubjectPills();
+  buildTimetable();
+  inp.focus();
+}
+function renderSetupSubjectPills() {
+  const div = document.getElementById('setup-subject-pills');
+  if (!div) return;
+  const grade = currentGrade();
+  const subs = state.subjectsByGrade[grade] || [];
+  if (subs.length === 0) {
+    div.innerHTML = '<span class="hint">まだ教科が登録されていません。下のフィールドから追加してください。</span>';
+    return;
+  }
+  div.innerHTML = subs.map((s, i) => `
+    <span class="subject-pill">${escapeHtml(s)}<button class="delete-btn" data-i="${i}" title="削除">×</button></span>
+  `).join('');
+  div.querySelectorAll('.delete-btn').forEach(b => {
+    b.onclick = () => {
+      const i = parseInt(b.dataset.i);
+      const removed = state.subjectsByGrade[grade][i];
+      if (!confirm(`教科「${removed}」を削除しますか？\n（時間割で使用中の場合、そのセルは空欄に変わります）`)) return;
+      state.subjectsByGrade[grade].splice(i, 1);
+      for (const wd of WEEKDAYS) {
+        for (let p = 0; p < (state.timetable[wd] || []).length; p++) {
+          if (state.timetable[wd][p] === removed) state.timetable[wd][p] = '';
+        }
+      }
+      saveAll();
+      renderSetupSubjectPills();
+      buildTimetable();
     };
   });
 }
@@ -2216,6 +2776,24 @@ function importStudentsFromExcel(file) {
   };
   reader.readAsArrayBuffer(file);
 }
+// Excelからコピーされたテキストをパースして2D配列に変換
+// (TAB区切り優先、なければカンマ区切りでフォールバック)
+function parsePastedTable(text) {
+  if (!text) return [];
+  // BOM除去
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const lines = text.split(/\r\n|\r|\n/);
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+  if (lines.length === 0) return [];
+  // 区切り判定: TABが含まれていればTAB、それ以外はCSVとして
+  const hasTab = lines.some(l => l.includes('\t'));
+  if (hasTab) {
+    return lines.map(l => l.split('\t').map(c => c.trim()));
+  } else {
+    return parseCSV(text);
+  }
+}
+
 function findHeaderRow(rows) {
   const NO_KEYS  = ['番号','No','No.','no','no.','出席番号','NO','№'];
   const NAME_KEYS = ['氏名','名前','なまえ','シメイ','Name','name'];
