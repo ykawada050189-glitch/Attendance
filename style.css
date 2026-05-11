@@ -41,6 +41,8 @@
   --c-abroad-bg: #ebdcf1;
   --c-leave: #8e44ad;        /* 休学 = 紫(濃) */
   --c-leave-bg: #e2cfeb;
+  --c-infirmary: #ec4899;    /* 保健室 = ピンク */
+  --c-infirmary-bg: #fce7f3;
   --c-present-border: #cfd8dc;
 
   --kind-holiday: #ffe5e5;
@@ -74,6 +76,7 @@
   --c-official-bg: #1a4029;
   --c-abroad-bg: #3a2245;
   --c-leave-bg: #321b3d;
+  --c-infirmary-bg: #4a1f3d;
 
   --kind-holiday: #4a2522;
   --kind-noclass: #4a3a18;
@@ -241,6 +244,7 @@ header h1 {
 .daily-row.s-official  .stat-icon-mini { background: var(--c-official); }
 .daily-row.s-abroad    .stat-icon-mini { background: var(--c-abroad); }
 .daily-row.s-leave     .stat-icon-mini { background: var(--c-leave); }
+.daily-row.s-infirmary .stat-icon-mini { background: var(--c-infirmary); }
 
 .daily-row.s-absent    { background: var(--c-absent-bg); }
 .daily-row.s-tardy     { background: var(--c-tardy-bg); }
@@ -250,8 +254,34 @@ header h1 {
 .daily-row.s-official  { background: var(--c-official-bg); }
 .daily-row.s-abroad    { background: var(--c-abroad-bg); }
 .daily-row.s-leave     { background: var(--c-leave-bg); }
+.daily-row.s-infirmary { background: var(--c-infirmary-bg); }
 .daily-row:hover { filter: brightness(0.97); }
 .daily-row.hidden-by-search { display: none; }
+
+/* 保健室用の小さい時限ピル(ミニ) */
+.period-pills.mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.period-pills.mini label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.period-pills.mini input[type="checkbox"] { margin: 0; }
+.period-pills.mini label:has(input:checked) {
+  background: var(--c-infirmary);
+  color: #fff;
+  border-color: var(--c-infirmary);
+}
 
 @media (max-width: 768px) {
   .daily-list-table { font-size: 12px; }
@@ -339,6 +369,109 @@ header h1 {
   font-size: 11px;
   border-radius: 10px;
 }
+.subject-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--pill-bg);
+  border-radius: 4px;
+  min-height: 40px;
+}
+.subject-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.subject-pill .delete-btn {
+  cursor: pointer;
+  color: var(--c-absent);
+  font-weight: bold;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  min-height: auto;
+}
+.subject-pill .delete-btn:hover { color: #fff; background: var(--c-absent); border-radius: 50%; }
+.subject-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.subject-add-row input { flex: 1; max-width: 200px; }
+.wiz-tt-grid { display: grid; gap: 4px; margin-top: 8px; }
+.wiz-tt-grid .cell {
+  padding: 6px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  text-align: center;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.wiz-tt-grid .head { background: var(--header-sub); color: #fff; font-weight: 600; }
+.wiz-tt-grid select { width: 100%; min-width: 70px; }
+
+/* 氏名セル方式入力（年度更新ステップ4 方法B） */
+.name-cell-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 0 0 4px 4px;
+  background: var(--card-bg);
+  overflow: hidden;
+}
+.name-cell-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.name-cell-row:last-child { border-bottom: none; }
+.name-cell-row .cell-no {
+  width: 32px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: "Consolas", monospace;
+}
+.name-cell-row input.name-cell {
+  flex: 1;
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+}
+.name-cell-row input.name-cell:focus {
+  border-color: var(--primary);
+  background: var(--card-bg);
+  outline: none;
+}
+.name-cell-row .cell-del {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 26px;
+  height: 26px;
+  min-height: auto;
+  padding: 0;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+}
+.name-cell-row .cell-del:hover { background: var(--c-absent); color: #fff; border-color: var(--c-absent); }
 #class-info-bar { display: inline-block; font-size: 13px; opacity: 0.9; }
 
 nav {
@@ -571,6 +704,7 @@ tbody tr:hover { background: var(--hover); }
 .student-card.s-official  { border-color: var(--c-official);  background: var(--c-official-bg); }
 .student-card.s-abroad    { border-color: var(--c-abroad);    background: var(--c-abroad-bg); }
 .student-card.s-leave     { border-color: var(--c-leave);     background: var(--c-leave-bg); }
+.student-card.s-infirmary { border-color: var(--c-infirmary); background: var(--c-infirmary-bg); }
 
 .student-card.s-absent    .stat-icon { background: var(--c-absent); }
 .student-card.s-tardy     .stat-icon { background: var(--c-tardy); }
@@ -580,6 +714,7 @@ tbody tr:hover { background: var(--hover); }
 .student-card.s-official  .stat-icon { background: var(--c-official); }
 .student-card.s-abroad    .stat-icon { background: var(--c-abroad); }
 .student-card.s-leave     .stat-icon { background: var(--c-leave); }
+.student-card.s-infirmary .stat-icon { background: var(--c-infirmary); }
 .student-card.s-present   .stat-icon { background: transparent; color: var(--text-muted); border: 1px dashed var(--border-strong); font-size: 12px; }
 
 /* 一括選択モード */
@@ -645,7 +780,7 @@ tbody tr:hover { background: var(--hover); }
 }
 .status-pills-secondary {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin-top: 4px;
 }
@@ -678,6 +813,7 @@ tbody tr:hover { background: var(--hover); }
 .status-pill.selected[data-status="official"] { background: var(--c-official); color: #fff; border-color: var(--c-official); }
 .status-pill.selected[data-status="abroad"]   { background: var(--c-abroad); color: #fff; border-color: var(--c-abroad); }
 .status-pill.selected[data-status="leave"]    { background: var(--c-leave); color: #fff; border-color: var(--c-leave); }
+.status-pill.selected[data-status="infirmary"]{ background: var(--c-infirmary); color: #fff; border-color: var(--c-infirmary); }
 
 .status-pill .icon-disc {
   width: 22px;
@@ -699,6 +835,7 @@ tbody tr:hover { background: var(--hover); }
 .status-pill[data-status="official"] .icon-disc { background: var(--c-official); }
 .status-pill[data-status="abroad"]   .icon-disc { background: var(--c-abroad); }
 .status-pill[data-status="leave"]    .icon-disc { background: var(--c-leave); }
+.status-pill[data-status="infirmary"].icon-disc, .status-pill[data-status="infirmary"] .icon-disc { background: var(--c-infirmary); }
 .status-pill.selected .icon-disc { background: #fff; color: #222; }
 
 .period-area {
@@ -774,6 +911,7 @@ tbody tr:hover { background: var(--hover); }
 .cal-cell .stu-list .stu-official  { background: var(--c-official-bg);  border-color: var(--c-official); }
 .cal-cell .stu-list .stu-abroad    { background: var(--c-abroad-bg);    border-color: var(--c-abroad); }
 .cal-cell .stu-list .stu-leave     { background: var(--c-leave-bg);     border-color: var(--c-leave); }
+.cal-cell .stu-list .stu-infirmary { background: var(--c-infirmary-bg); border-color: var(--c-infirmary); }
 .cal-cell.today { outline: 3px solid var(--primary); outline-offset: -3px; }
 
 /* ===== 警告セクション ===== */
@@ -853,6 +991,7 @@ td.no-day { color: var(--text-muted); background: var(--bg); font-style: italic;
 .summary-mini-cal .mc-day.s-official  { background: var(--c-official-bg); }
 .summary-mini-cal .mc-day.s-abroad    { background: var(--c-abroad-bg); }
 .summary-mini-cal .mc-day.s-leave     { background: var(--c-leave-bg); }
+.summary-mini-cal .mc-day.s-infirmary { background: var(--c-infirmary-bg); color: var(--c-infirmary); font-weight: bold; }
 .summary-mini-cal-row-label { font-size: 11px; color: var(--text-muted); }
 
 /* ===== レスポンシブ ===== */
