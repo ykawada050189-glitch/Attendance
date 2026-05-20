@@ -1240,7 +1240,8 @@ function getScheduleOn(dateStr) {
 }
 function getDayPeriodCount(dateStr) {
   const cls = classifyDate(dateStr);
-  if (cls.kind === 'holiday' || cls.kind === 'noclass') return 0;
+  if (cls.kind === 'holiday') return 0;
+  // 授業なし(noclass)の日でも遅刻/早退/保健室の時限選択ができるよう、標準時限数を返す
   const sched = getScheduleOn(dateStr);
   if (sched.length > 0) return sched.length;
   return state.config.periods || 6;
@@ -1478,33 +1479,58 @@ function renderScheduleEditSection(dateStr, container) {
     container.innerHTML = `<div class="card"><p class="hint">学校休みのため時間割は表示しません。</p></div>`;
     return;
   }
-  if (cls.kind === 'noclass') {
-    container.innerHTML = `<div class="card"><p class="hint">授業なし（学校あり）のため時間割は表示しません。出停・忌引などの記録は可能です。</p></div>`;
-    return;
-  }
+  const isNoClass = cls.kind === 'noclass';
   const sched = getScheduleOn(dateStr);
   const periodCount = getDayPeriodCount(dateStr);
+  const grade = currentGrade();
+  const subjList = (state.subjectsByGrade && state.subjectsByGrade[grade]) || [];
+
   let head = '<div class="cell head">時限</div>';
   let body = '<div class="cell head">教科</div>';
   for (let i = 0; i < periodCount; i++) {
     head += `<div class="cell head">${i+1}限</div>`;
-    body += `<div class="cell"><input type="text" data-period="${i}" value="${escapeHtml(sched[i]||'')}"></div>`;
+    const v = sched[i] || '';
+    const opts = buildSubjectOptions(v, subjList);
+    body += `<div class="cell"><select data-period="${i}">${opts}</select></div>`;
   }
+
+  const titleText = isNoClass
+    ? '当日の時間割（試験日など – 教科を選択すると各教科の授業日数にカウントされます）'
+    : '当日の時間割（変更可）';
+  const resetLabel = isNoClass ? '空に戻す' : '通常時間割に戻す';
+  const hintText = isNoClass
+    ? '初期はすべて「－」（空欄）です。試験で実施した教科を選ぶと、その教科の授業日数に加算されます。'
+    : '空欄（－）の時限は授業なし扱い。プルダウンの選択は自動保存されます。';
+
   container.innerHTML = `
     <div class="card">
-      <h3>当日の時間割（変更可）</h3>
+      <h3>${titleText}</h3>
       <div class="row">
         <label>この日の時限数:
           <input type="number" class="day-period-count" min="0" max="10" value="${periodCount}">
         </label>
         <button class="day-period-apply small">時限数を変更</button>
-        <button class="day-schedule-save small primary">時間割を保存</button>
-        <button class="day-schedule-reset small">通常時間割に戻す</button>
+        <button class="day-schedule-reset small">${resetLabel}</button>
       </div>
       <div class="schedule-grid" style="--periods:${periodCount};">${head}${body}</div>
-      <p class="hint">空欄の時限は授業なし扱い。</p>
+      <p class="hint">${hintText}</p>
     </div>
   `;
+
+  // セル選択時は自動保存
+  container.querySelectorAll('select[data-period]').forEach(sel => {
+    sel.onchange = (e) => {
+      if (!state.overrides[dateStr]) state.overrides[dateStr] = {};
+      if (!Array.isArray(state.overrides[dateStr].schedule)) {
+        const init = [];
+        for (let i = 0; i < periodCount; i++) init[i] = sched[i] || '';
+        state.overrides[dateStr].schedule = init;
+      }
+      state.overrides[dateStr].schedule[parseInt(e.target.dataset.period)] = e.target.value;
+      saveAll();
+    };
+  });
+
   container.querySelector('.day-period-apply').onclick = () => {
     const newCount = parseInt(container.querySelector('.day-period-count').value);
     if (isNaN(newCount) || newCount < 0) return;
@@ -1516,16 +1542,7 @@ function renderScheduleEditSection(dateStr, container) {
     saveAll();
     refreshCurrentView();
   };
-  container.querySelector('.day-schedule-save').onclick = () => {
-    const inputs = container.querySelectorAll('input[data-period]');
-    const arr = [];
-    inputs.forEach(inp => arr[parseInt(inp.dataset.period)] = inp.value.trim());
-    if (!state.overrides[dateStr]) state.overrides[dateStr] = {};
-    state.overrides[dateStr].schedule = arr;
-    saveAll();
-    toast('時間割を保存しました', 'success');
-    refreshCurrentView();
-  };
+
   container.querySelector('.day-schedule-reset').onclick = () => {
     if (state.overrides[dateStr]) {
       delete state.overrides[dateStr].schedule;
@@ -1584,7 +1601,7 @@ function renderAttendanceArea(dateStr, container) {
         <button id="reset-all-present" class="small">全員「出席」に</button>
         <button class="bulk-toggle ${bulkMode?'active':''}" id="bulk-toggle">${bulkMode?'通常モードに戻す':'☰ 一括選択モード'}</button>
       </div>
-      ${cls.kind === 'noclass' ? '<p class="hint">授業なしの日です。出停・忌引・公欠などの記録のみ可能です。</p>' : ''}
+      ${cls.kind === 'noclass' ? '<p class="hint">授業なし（学校あり）の日です。通常通り全ての出欠状態が登録できます。</p>' : ''}
       <div class="student-cards" id="student-cards-${dateStr.replace(/-/g,'')}">${cards}</div>
       ${bulkBar}
     </div>
@@ -1713,7 +1730,10 @@ function renderDashboard() {
   // 1. 今日の日情報
   renderDayInfoSection(today, document.getElementById('dash-day-info'));
 
-  // 2. 出欠入力エリア（今日の分を直接表示）
+  // 2. 当日の時間割編集(試験日などで教科を追加するときも使用)
+  renderScheduleEditSection(today, document.getElementById('dash-schedule-edit'));
+
+  // 3. 出欠入力エリア（今日の分を直接表示）
   renderAttendanceArea(today, document.getElementById('dash-attendance-area'));
 
   // 3. 警告
@@ -1802,24 +1822,19 @@ function computeSubjectStatistics() {
       terms.push({ start: term3Start, end: end3 });
     }
   }
-  // 各学期の追加回数: 1学期(4-7月開始) +3, 2学期(9-12月開始) +3, 3学期(1-3月開始) +2
-  const termAdd = (termStart) => {
-    const m = parseYmd(termStart).getMonth() + 1;
-    return (m >= 1 && m <= 3) ? 2 : 3;
-  };
+  // 年間授業日数 = 各学期内の実授業数の合計
+  // 試験日などは「時間割を当日上書き」で教科を登録するとその回数も加算される
   const baseTotals = {};
   for (const subj of subjectArr) {
     let total = 0;
     for (const t of terms) {
-      let count = 0;
       for (let d = parseYmd(t.start); d <= parseYmd(t.end); d.setDate(d.getDate()+1)) {
         const ds = ymd(d);
         const cls = classifyDate(ds);
-        if (cls.kind === 'holiday' || cls.kind === 'noclass') continue;
+        if (cls.kind === 'holiday') continue;
         const sched = getScheduleOn(ds);
-        for (const s of sched) if (s && s.trim() === subj) count++;
+        for (const s of sched) if (s && s.trim() === subj) total++;
       }
-      total += count + termAdd(t.start);
     }
     baseTotals[subj] = total;
   }
@@ -1831,9 +1846,10 @@ function computeSubjectStatistics() {
       const att = state.attendance[ds][stu.no];
       if (!att) continue;
       const cls = classifyDate(ds);
-      if (cls.kind === 'holiday' || cls.kind === 'noclass') continue;
+      if (cls.kind === 'holiday') continue;
       const sched = getScheduleOn(ds);
       const periodCount = sched.length;
+      if (periodCount === 0) continue; // 時間割未設定の日は教科集計対象外
       const perPeriod = periodStatusForDay(att, periodCount);
       for (let i = 0; i < periodCount; i++) {
         const subj = (sched[i] || '').trim();
@@ -1877,9 +1893,8 @@ function renderAttendanceListArea(dateStr, container) {
   }
   const att = state.attendance[dateStr] || {};
   const periodCount = getDayPeriodCount(dateStr);
-  const ALLOWED = cls.kind === 'noclass'
-    ? ['present','absent','suspended','mourning','official','abroad','leave']
-    : STATUS_TYPES.map(s => s.code);
+  // 授業なしの日でも全ての状態を選択可能(遅刻・早退・保健室を含む)
+  const ALLOWED = STATUS_TYPES.map(s => s.code);
 
   let rows = '';
   for (const stu of state.students) {
@@ -1934,7 +1949,7 @@ function renderAttendanceListArea(dateStr, container) {
         <input type="search" id="daily-list-search" placeholder="🔍 番号 or 氏名で検索" value="${escapeHtml(searchQuery)}">
         <button id="daily-list-reset" class="small">全員「出席」に</button>
       </div>
-      ${cls.kind === 'noclass' ? '<p class="hint">授業なしの日です。出停・忌引・公欠などの記録のみ可能です。</p>' : ''}
+      ${cls.kind === 'noclass' ? '<p class="hint">授業なし（学校あり）の日です。通常通り全ての出欠状態が登録できます。</p>' : ''}
       <div style="overflow-x:auto;">
         <table class="daily-list-table">
           <thead>
@@ -2100,9 +2115,8 @@ function openStudentModal(stuNo, dateStr) {
 }
 function renderModalBody() {
   const ctx = modalCtx;
-  const ALLOWED = ctx.noClassDay
-    ? ['present','absent','suspended','mourning','official','abroad','leave']
-    : STATUS_TYPES.map(s => s.code);
+  // 授業なしの日でも全ての状態を選択可能
+  const ALLOWED = STATUS_TYPES.map(s => s.code);
   const renderPill = (code) => {
     if (!ALLOWED.includes(code)) return '';
     const t = STATUS_TYPES.find(s => s.code === code);
@@ -2504,8 +2518,8 @@ function renderSubject() {
         </label>
         <span class="hint">クラス基準の年間授業数: <strong>${baseTotal}回</strong>（1/3=${Math.floor(baseTotal/3)}回）</span>
       </div>
-      <p class="hint">年間授業日数 = 1学期(実授業数+3) + 2学期(実授業数+3) + 3学期(実授業数+2)。個人の授業数は、その生徒の <strong>出停・忌引・留学・休学</strong> 分を減算。
-      欠席は <strong>「欠席」のみ</strong>カウント（公欠・遅刻・早退は出席扱い）。1/3超過は <span class="warn">赤色</span>。</p>
+      <p class="hint">年間授業日数 = 通常授業＋試験日などで時間割に教科を登録した分の合計。個人の授業数は、その生徒の <strong>出停・忌引・留学・休学</strong> 分を減算。
+      欠席は <strong>「欠席」</strong>と<strong>「保健室」</strong>をカウント（公欠・遅刻・早退は出席扱い）。1/3超過は <span class="warn">赤色</span>。</p>
       <div style="overflow-x:auto;">
         <table>
           <thead><tr><th>No.</th><th>氏名</th><th>授業数</th><th>欠席数</th><th>1/3</th><th>残り回数</th></tr></thead>
