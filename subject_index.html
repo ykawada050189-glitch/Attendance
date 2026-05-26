@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none';">
+<meta name="referrer" content="no-referrer">
+<title>【授業】出欠管理アプリ</title>
+<link rel="stylesheet" href="subject_style.css">
+</head>
+<body>
+<header>
+  <div class="header-top">
+    <h1>📚 授業別 出欠管理</h1>
+    <div id="year-info" class="year-info"></div>
+    <div class="header-tools">
+      <span id="saved-indicator" title="自動保存タイムスタンプ"></span>
+      <button id="storage-indicator" title="ストレージ使用量">📦 -</button>
+      <button id="theme-toggle" title="ダーク/ライト切替">🌓</button>
+    </div>
+  </div>
+  <nav>
+    <button class="nav-btn active" data-view="today">📝 当日入力</button>
+    <button class="nav-btn" data-view="past">📅 過去入力</button>
+    <button class="nav-btn" data-view="list">📋 一覧・編集</button>
+    <button class="nav-btn" data-view="export">📊 集計・コピー</button>
+    <button class="nav-btn" data-view="setup">⚙️ 登録情報</button>
+    <button class="nav-btn" data-view="yearupdate">🔄 年度更新</button>
+    <button class="nav-btn" data-view="data">💾 データ管理</button>
+  </nav>
+</header>
+
+<main id="main">
+
+<!-- ===== 当日入力 ===== -->
+<section id="view-today" class="view">
+  <h2>📝 当日の出欠入力</h2>
+  <div class="card">
+    <div class="row">
+      <label>日付:
+        <input type="date" id="today-date">
+      </label>
+      <label>担当授業:
+        <select id="today-assignment"></select>
+      </label>
+      <label>時限:
+        <select id="today-period">
+          <option value="1">1時間目</option>
+          <option value="2">2時間目</option>
+          <option value="3">3時間目</option>
+          <option value="4">4時間目</option>
+          <option value="5">5時間目</option>
+          <option value="6">6時間目</option>
+          <option value="7">7時間目</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint">クラス・日付・時限を変更すると名簿が自動で切り替わります。「💾 登録する」を押すまで保存されません。</p>
+  </div>
+  <div id="today-roster-area"></div>
+
+  <!-- 同じ日に登録済みの授業一覧 -->
+  <div class="card" id="today-registered-card">
+    <h3 style="margin-top:0;">📋 この日に登録済みの授業</h3>
+    <p class="hint">下のチップをクリックすると、その授業の出欠入力画面を上に表示します。</p>
+    <div id="today-registered-list"></div>
+  </div>
+</section>
+
+<!-- ===== 過去入力 ===== -->
+<section id="view-past" class="view hidden">
+  <h2>📅 過去日付の出欠入力</h2>
+  <div class="card">
+    <div class="row">
+      <label>担当授業:
+        <select id="past-assignment"></select>
+      </label>
+      <label>日付:
+        <input type="date" id="past-date">
+        <button id="past-yesterday" type="button" style="padding:4px 10px;">昨日</button>
+      </label>
+      <label>時限:
+        <select id="past-period">
+          <option value="1">1時間目</option>
+          <option value="2">2時間目</option>
+          <option value="3">3時間目</option>
+          <option value="4">4時間目</option>
+          <option value="5">5時間目</option>
+          <option value="6">6時間目</option>
+          <option value="7">7時間目</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint">クラス・日付・時限を変更すると名簿が自動で切り替わります。当日の入力忘れや内容修正にお使いください。</p>
+  </div>
+  <div id="past-roster-area"></div>
+
+  <!-- 同じ日に登録済みの授業一覧 -->
+  <div class="card">
+    <h3 style="margin-top:0;">📋 この日に登録済みの授業</h3>
+    <p class="hint">下のチップをクリックすると、その授業の出欠入力画面を上に表示します。</p>
+    <div id="past-registered-list"></div>
+  </div>
+</section>
+
+<!-- ===== 一覧・編集 ===== -->
+<section id="view-list" class="view hidden">
+  <h2>📋 入力済みデータ一覧・編集</h2>
+  <div class="card">
+    <div class="row">
+      <label>担当授業:
+        <select id="list-assignment"></select>
+      </label>
+      <label>表示期間:
+        <input type="date" id="list-from">
+        〜
+        <input type="date" id="list-to">
+      </label>
+      <button id="list-load" class="primary">一覧を表示</button>
+      <button id="list-this-month">今月</button>
+      <button id="list-all">全期間</button>
+    </div>
+    <p class="hint">各セルをクリックすると、その日・時限の出欠を編集できます。<br>
+    背景色：<span class="legend-color s-present">出席</span>
+    <span class="legend-color s-official">公欠</span>
+    <span class="legend-color s-suspended">出停</span>
+    <span class="legend-color s-mourning">忌引</span>
+    <span class="legend-color s-absent">欠席</span></p>
+  </div>
+  <div id="list-area"></div>
+</section>
+
+<!-- ===== 集計・コピー ===== -->
+<section id="view-export" class="view hidden">
+  <h2>📊 期間集計・データコピー</h2>
+  <div class="card">
+    <div class="row">
+      <label>期間:
+        <input type="date" id="export-from">
+        〜
+        <input type="date" id="export-to">
+      </label>
+      <label>担当授業:
+        <select id="export-assignment"></select>
+      </label>
+      <button id="export-load" class="primary">集計</button>
+      <button id="export-this-month">今月</button>
+      <button id="export-this-term">期間プリセット…</button>
+      <button id="export-print" title="集計結果を印刷">🖨️ 印刷</button>
+    </div>
+    <p class="hint">期間とクラスを選び「集計」を押すと、生徒ごとの集計が表示されます。各列の「コピー」ボタンを押すと、その列の値が縦並びでクリップボードにコピーされ、Excel等にそのまま貼り付けできます。</p>
+  </div>
+  <div id="export-area"></div>
+</section>
+
+<!-- ===== 登録情報（担当授業・名簿）===== -->
+<section id="view-setup" class="view hidden">
+  <h2>⚙️ 登録情報（担当授業・名簿）</h2>
+
+  <div class="card">
+    <h3>① 年度</h3>
+    <div class="row">
+      <label>現在の年度:
+        <input type="number" id="setup-year" min="2020" max="2099">
+      </label>
+      <button id="setup-year-save">年度を保存</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>② 担当授業を追加</h3>
+    <p class="hint">担当している授業を追加してください。「クラス」が複数学年・複数クラスにまたがる場合は「混在」を選んでください。</p>
+    <div class="row">
+      <label>学年:
+        <select id="add-grade">
+          <option value="1">1年</option>
+          <option value="2">2年</option>
+          <option value="3">3年</option>
+        </select>
+      </label>
+      <label>クラス:
+        <select id="add-class"></select>
+      </label>
+      <label>授業名:
+        <input type="text" id="add-subject" placeholder="例: 数学Ⅰ, 物理基礎">
+      </label>
+      <button id="add-assignment" class="primary">＋ 担当授業を追加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>③ 登録済みの担当授業</h3>
+    <p class="hint">右側の「名簿」ボタンから、各授業の名簿を登録・編集できます。</p>
+    <table id="assignments-table">
+      <thead>
+        <tr>
+          <th>学年</th>
+          <th>クラス</th>
+          <th>授業名</th>
+          <th>名簿</th>
+          <th>削除</th>
+        </tr>
+      </thead>
+      <tbody id="assignments-tbody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===== 年度更新 ===== -->
+<section id="view-yearupdate" class="view hidden">
+  <h2>🔄 年度更新・アーカイブ</h2>
+
+  <div class="card">
+    <h3>📦 現在の年度をアーカイブ</h3>
+    <p class="hint">現在の年度の全データ（担当授業・名簿・出欠データ）をアーカイブとして保存します。<br>
+    アーカイブ後も現在のデータは残ります。年度途中の定期バックアップにも使えます。</p>
+    <div class="row">
+      <label>アーカイブ名（任意）:
+        <input type="text" id="archive-name" placeholder="例: 2025年度_期末">
+      </label>
+      <button id="archive-now" class="primary">📦 今すぐアーカイブ</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📂 アーカイブ一覧</h3>
+    <p class="hint">過去のアーカイブを一覧表示します。閲覧・復元・削除ができます。</p>
+    <div id="archives-list"></div>
+  </div>
+
+  <div class="card">
+    <h3>🆕 新年度に切り替え</h3>
+    <p class="hint">現在のデータをアーカイブしたうえで、担当授業・出欠データを初期化し、新年度の準備を行います。<br>
+    （名簿のひな形は引き継ぎません。担当授業から登録し直してください。）</p>
+    <div class="row">
+      <label>新しい年度:
+        <input type="number" id="new-year" min="2020" max="2099">
+      </label>
+      <button id="start-new-year" class="danger">🆕 新年度に切り替え（要確認）</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== データ管理 ===== -->
+<section id="view-data" class="view hidden">
+  <h2>💾 データ管理</h2>
+
+  <div class="card" style="background:#e8f5e9; border-left:4px solid var(--primary);">
+    <h3>🔒 プライバシー</h3>
+    <p class="hint">
+      入力された全データ（担当授業・生徒名簿・出欠データ）は<strong>お使いの端末のブラウザ内（localStorage）にのみ保存</strong>されます。<br>
+      外部サーバへの送信は一切行いません（CSPで通信を遮断）。バックアップは下のエクスポート機能をご利用ください。
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>📊 ストレージ使用状況</h3>
+    <div class="storage-bar">
+      <div class="storage-bar-fill" id="storage-bar-fill" style="width:0%;">0%</div>
+    </div>
+    <p>使用中: <strong id="storage-size-display">- KB</strong> / 約 5,120 KB</p>
+  </div>
+
+  <div class="card">
+    <h3>📤 エクスポート（フルバックアップ）</h3>
+    <p class="hint">全データをJSONファイルに保存します。</p>
+    <button id="data-export" class="primary">JSONでエクスポート</button>
+  </div>
+
+  <div class="card">
+    <h3>📥 インポート（復元）</h3>
+    <p class="hint">エクスポートしたJSONファイルを読み込みます（既存データは上書き）。</p>
+    <input type="file" id="data-import-file" accept=".json">
+  </div>
+
+  <div class="card">
+    <h3>⚠️ 全データ削除</h3>
+    <p class="hint">全ての担当授業・名簿・出欠データ・アーカイブを削除します（取り消せません）。</p>
+    <button id="data-clear" class="danger">全データ削除</button>
+  </div>
+</section>
+
+</main>
+
+<!-- ===== 名簿登録モーダル ===== -->
+<div id="roster-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content modal-large">
+    <h3 id="roster-modal-title">名簿の登録</h3>
+    <p class="hint">
+      氏名を1人ずつ入力してください。入力すると自動で次の欄が現れます。<br>
+      ・Excel等からコピーした内容を <strong>1番（または途中の番号）の欄</strong> に貼り付けると、その番号以降にまとめて反映されます。<br>
+      ・「📋 クリップボードから貼り付け」ボタンを押すだけでも一括反映できます。<br>
+      ・<strong>番号は自動で割り当てられます</strong>（入力不要）。
+    </p>
+    <div class="row" style="justify-content:flex-end; gap:6px;">
+      <button id="roster-paste-btn" class="primary">📋 クリップボードから貼り付け</button>
+      <button id="roster-clear-all">全削除</button>
+    </div>
+    <div id="roster-rows-area" class="roster-rows-area"></div>
+    <div class="modal-foot">
+      <div class="left">
+        <span id="roster-count-info"></span>
+      </div>
+      <div class="right">
+        <button id="roster-cancel">キャンセル</button>
+        <button id="roster-save" class="primary">この内容で登録する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 一覧・編集用 編集モーダル ===== -->
+<div id="cell-edit-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <h3 id="cell-edit-title">出欠の編集</h3>
+    <div id="cell-edit-body"></div>
+    <div class="modal-foot">
+      <div class="right">
+        <button id="cell-edit-cancel">キャンセル</button>
+        <button id="cell-edit-delete" class="danger">この回を削除</button>
+        <button id="cell-edit-save" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 生徒履歴モーダル ===== -->
+<div id="student-history-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content modal-large">
+    <h3 id="student-history-title">生徒の履歴</h3>
+    <div id="student-history-body"></div>
+    <div class="modal-foot">
+      <div class="right">
+        <button id="student-history-close">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 汎用確認モーダル ===== -->
+<div id="confirm-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content modal-small">
+    <h3 id="confirm-title">確認</h3>
+    <div id="confirm-body"></div>
+    <div class="modal-foot">
+      <div class="right">
+        <button id="confirm-cancel">キャンセル</button>
+        <button id="confirm-ok" class="primary">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="subject_app.js"></script>
+</body>
+</html>
