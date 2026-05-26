@@ -131,7 +131,9 @@ function updateStorageIndicator() {
 
 // ===== 共通 UI =====
 function getAssignmentLabel(a) {
-  return `${a.grade}年${a.class} ${a.subject}`;
+  // 例: "1年A組地理総合"  / 混在の場合は "1年混在クラス地理総合"
+  const cls = a.class === '混在' ? '混在クラス' : `${a.class}組`;
+  return `${a.grade}年${cls}${a.subject}`;
 }
 function fillAssignmentSelect(selectEl, includeEmpty=false) {
   selectEl.innerHTML = '';
@@ -283,9 +285,10 @@ function renderRegisteredList(prefix) {
     btn.dataset.asgId = asg.id;
     btn.dataset.period = period;
     btn.title = `${getAssignmentLabel(asg)} ／ ${period}時間目（クリックで上の入力欄に表示）`;
+    const clsLabel = asg.class === '混在' ? '混在クラス' : `${asg.class}組`;
     btn.innerHTML = `
       <span class="reg-period">${period}限</span>
-      <span class="reg-class">${escape(asg.grade)}年${escape(asg.class)}</span>
+      <span class="reg-class">${escape(asg.grade)}年${escape(clsLabel)}</span>
       <span class="reg-subject">${escape(asg.subject)}</span>
     `;
     grid.appendChild(btn);
