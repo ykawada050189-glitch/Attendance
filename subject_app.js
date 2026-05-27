@@ -534,12 +534,12 @@ function loadRosterFor(targetAreaId, asgId, date, period) {
   tbl.appendChild(tbody);
   card.appendChild(tbl);
 
-  // 登録ボタン
+  // 登録ボタン（画面右下に固定表示）
   const foot = document.createElement('div');
-  foot.style.cssText = 'margin-top:14px; display:flex; gap:10px; justify-content:flex-end;';
+  foot.className = 'roster-action-fab';
   foot.innerHTML = `
     ${isEdit ? '<button class="danger" id="rosterDeleteBtn">この回を削除</button>' : ''}
-    <button class="primary" id="rosterSaveBtn" style="font-size:15px; padding:10px 24px;">💾 登録する</button>
+    <button class="primary" id="rosterSaveBtn">💾 登録する</button>
   `;
   card.appendChild(foot);
   area.appendChild(card);
@@ -1207,11 +1207,411 @@ function applyNamesFromIndex(startIdx, names) {
 }
 
 // =====================================================
-// 年度更新ビュー
+// 年度更新ウィザード（5ステップ）
 // =====================================================
+let wizardStep = 1;
+const wizardApplied = { step2: false, step3: false, step4: false };
+let wizardCommit = null;          // 各ステップの「次へ」押下時に実行するハンドラ
+const wizardData = {
+  archiveOption: null,            // 'archive' | 'skip' | null（step2）
+  newYear: '',                    // step3
+  pendingRows: [],                // step3：{tempId, grade, class, subject}
+  createdAssignmentIds: [],       // step3コミット後に保持（step4で使用）
+};
+
+const WIZARD_STEPS = [
+  { id: 1, label: 'ようこそ' },
+  { id: 2, label: 'アーカイブ' },
+  { id: 3, label: '新年度・担当授業' },
+  { id: 4, label: '名簿登録' },
+  { id: 5, label: '完了' },
+];
+
 function refreshYearUpdateView() {
-  $('#new-year').value = String(+state.year + 1);
+  renderWizard();
   renderArchivesList();
+}
+
+function resetWizardOnFinish() {
+  wizardStep = 1;
+  Object.keys(wizardApplied).forEach(k => wizardApplied[k] = false);
+  wizardData.archiveOption = null;
+  wizardData.newYear = '';
+  wizardData.pendingRows = [];
+  wizardData.createdAssignmentIds = [];
+}
+
+function renderWizard() {
+  // プログレスバー
+  const progEl = $('#wizard-progress');
+  progEl.innerHTML = '';
+  WIZARD_STEPS.forEach(s => {
+    let cls = '';
+    if (s.id === wizardStep) cls = 'active';
+    else if (s.id < wizardStep) cls = 'done';
+    const el = document.createElement('div');
+    el.className = 'step ' + cls;
+    el.dataset.step = s.id;
+    el.innerHTML = `<span class="step-num">${s.id}.</span>${escape(s.label)}`;
+    el.onclick = () => { wizardStep = +el.dataset.step; renderWizard(); };
+    progEl.appendChild(el);
+  });
+
+  wizardCommit = null;
+  const c = $('#wizard-content');
+  c.innerHTML = '';
+  if (wizardStep === 1) renderWizStep1(c);
+  else if (wizardStep === 2) renderWizStep2(c);
+  else if (wizardStep === 3) renderWizStep3(c);
+  else if (wizardStep === 4) renderWizStep4(c);
+  else if (wizardStep === 5) renderWizStep5(c);
+
+  // ナビゲーション制御
+  const back = $('#wizard-back');
+  const skip = $('#wizard-skip');
+  const next = $('#wizard-next');
+  back.disabled = (wizardStep === 1);
+  skip.style.display = (wizardStep === 1 || wizardStep === 5) ? 'none' : '';
+  if (wizardStep === 5) {
+    next.textContent = '🎉 終了する';
+  } else {
+    next.textContent = '次へ ▶';
+  }
+}
+
+// ===== Step 1: ようこそ =====
+function renderWizStep1(c) {
+  const asgN = state.assignments.length;
+  const rosN = Object.values(state.rosters || {}).reduce((sum, r) => sum + (r?.length || 0), 0);
+  const attDays = Object.values(state.attendance || {}).reduce((s, byAsg) => s + Object.keys(byAsg).length, 0);
+  c.innerHTML = `
+    <h3>① ようこそ</h3>
+    <div class="wizard-current-info">
+      <strong>現在の年度：</strong> ${escape(state.year)}年度<br>
+      <strong>担当授業：</strong> ${asgN}件 ／ <strong>名簿合計：</strong> ${rosN}名 ／ <strong>出欠データのある授業日数（重複あり）：</strong> ${attDays}件
+    </div>
+    <p>次のステップで進めます：</p>
+    <ol style="line-height:1.9;">
+      <li><strong>② アーカイブ</strong> ── 現在の年度の全データをスナップショットとして保存します（推奨）</li>
+      <li><strong>③ 新年度・担当授業</strong> ── 新しい年度番号と、複数の担当授業をまとめて登録します</li>
+      <li><strong>④ 名簿登録</strong> ── ③で登録した各授業の名簿を順番に登録します</li>
+      <li><strong>⑤ 完了</strong> ── 概要を確認して終了します</li>
+    </ol>
+    <p class="hint">途中で中断しても、続きから再開できます。各ステップは「スキップ」も可能です。</p>
+  `;
+}
+
+// ===== Step 2: アーカイブ =====
+function renderWizStep2(c) {
+  c.innerHTML = `
+    <h3>② 現在の年度をアーカイブ ${wizardApplied.step2 ? '<span class="wizard-applied">✓ 実行済</span>' : ''}</h3>
+    <p class="hint">新年度に切り替える前に、現在の <strong>${escape(state.year)}年度</strong> の全データをアーカイブとして保存することを推奨します。<br>
+    アーカイブは「📂 アーカイブ一覧」（下部）からいつでも閲覧・ダウンロードできます。</p>
+    <div class="wizard-choice-block" id="wiz-arc-do">
+      <h4>📦 アーカイブして次へ進む（推奨）</h4>
+      <div style="margin:6px 0;">
+        <label>アーカイブ名（任意）:
+          <input type="text" id="wiz-arc-name" placeholder="例: ${escape(state.year)}年度（年度更新時）" style="width: 260px;">
+        </label>
+      </div>
+    </div>
+    <div class="wizard-choice-block" id="wiz-arc-skip">
+      <h4>⏭ アーカイブせず次へ進む</h4>
+      <p class="hint">既にバックアップ済み、または保存不要な場合に。</p>
+    </div>
+  `;
+  const apply = (opt) => {
+    wizardData.archiveOption = opt;
+    $('#wiz-arc-do').classList.toggle('selected', opt === 'archive');
+    $('#wiz-arc-skip').classList.toggle('selected', opt === 'skip');
+  };
+  $('#wiz-arc-do').onclick = () => apply('archive');
+  $('#wiz-arc-skip').onclick = () => apply('skip');
+  if (wizardData.archiveOption) apply(wizardData.archiveOption);
+
+  wizardCommit = () => {
+    if (!wizardData.archiveOption) {
+      toast('「アーカイブする / しない」を選択してください', 'error');
+      return false;
+    }
+    if (wizardData.archiveOption === 'archive') {
+      const name = $('#wiz-arc-name').value.trim() || `${state.year}年度（年度更新時）`;
+      const arc = createArchive(name);
+      toast(`アーカイブ「${arc.name}」を保存しました`, 'success');
+    }
+    wizardApplied.step2 = true;
+    return true;
+  };
+}
+
+// ===== Step 3: 新年度・担当授業の登録 =====
+function ensureWizPendingTrailingRow() {
+  const last = wizardData.pendingRows[wizardData.pendingRows.length - 1];
+  if (!last || (last.subject || '').trim() !== '') {
+    // 未選択状態（プレースホルダ表示）で追加
+    wizardData.pendingRows.push({ tempId: uid(), grade: '', class: '', subject: '' });
+  }
+}
+function renderWizStep3(c) {
+  // 初期化
+  if (!wizardData.newYear) wizardData.newYear = String(+state.year + 1);
+  if (wizardData.pendingRows.length === 0) ensureWizPendingTrailingRow();
+
+  c.innerHTML = `
+    <h3>③ 新年度と担当授業をまとめて登録 ${wizardApplied.step3 ? '<span class="wizard-applied">✓ 適用済</span>' : ''}</h3>
+    <p class="hint">⚠️ 「次へ」を押すと、現在の担当授業・名簿・出欠データは <strong>全て初期化</strong> されます（アーカイブ済みでも、現データは消えます）。<br>
+    複数の担当授業を一度にまとめて入力できます。授業名を入力すると次の行が自動で増えます。</p>
+    <div class="wizard-current-info">
+      <label>新しい年度:
+        <input type="number" id="wiz-new-year" min="2020" max="2099" value="${escape(wizardData.newYear)}" style="width: 110px;">
+      </label>
+      <span style="margin-left:14px;">（現在: ${escape(state.year)}年度）</span>
+    </div>
+    <table class="wiz-asg-table">
+      <thead>
+        <tr>
+          <th class="col-grade">学年</th>
+          <th class="col-class">クラス</th>
+          <th class="col-subject">授業名</th>
+          <th class="col-del"></th>
+        </tr>
+      </thead>
+      <tbody id="wiz-asg-tbody"></tbody>
+    </table>
+    <div class="row">
+      <button type="button" id="wiz-asg-add">＋ 行を追加</button>
+      <span id="wiz-asg-count" class="hint"></span>
+    </div>
+  `;
+
+  const tbody = $('#wiz-asg-tbody');
+  const renderRows = () => {
+    tbody.innerHTML = '';
+    ensureWizPendingTrailingRow();
+    wizardData.pendingRows.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.dataset.idx = idx;
+      const isEmpty = !(row.subject || '').trim();
+      if (isEmpty) tr.classList.add('wiz-row-empty');
+      tr.innerHTML = `
+        <td class="col-grade">
+          <select data-field="grade" class="${row.grade ? '' : 'is-placeholder'}">
+            <option value="" disabled hidden ${!row.grade ? 'selected' : ''}>学年を選択</option>
+            ${[1,2,3].map(n => `<option value="${n}" ${String(row.grade)===String(n)?'selected':''}>${n}年</option>`).join('')}
+          </select>
+        </td>
+        <td class="col-class">
+          <select data-field="class" class="${row.class ? '' : 'is-placeholder'}">
+            <option value="" disabled hidden ${!row.class ? 'selected' : ''}>クラスを選択</option>
+            ${CLASS_LETTERS.map(l => `<option value="${escape(l)}" ${row.class===l?'selected':''}>${escape(l==='混在'?'混在':l+'組')}</option>`).join('')}
+          </select>
+        </td>
+        <td class="col-subject">
+          <input type="text" data-field="subject" value="${escape(row.subject||'')}" placeholder="授業名を入力（貼り付け可）">
+        </td>
+        <td class="col-del">
+          <button type="button" class="wiz-row-del" title="削除">×</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+    const filled = wizardData.pendingRows.filter(r => (r.subject||'').trim() !== '').length;
+    $('#wiz-asg-count').textContent = `入力済み ${filled}件`;
+  };
+  renderRows();
+
+  tbody.addEventListener('input', e => {
+    const t = e.target;
+    if (t.matches('select, input')) {
+      const tr = t.closest('tr');
+      const idx = +tr.dataset.idx;
+      wizardData.pendingRows[idx][t.dataset.field] = t.value;
+      if (t.dataset.field === 'subject') {
+        tr.classList.toggle('wiz-row-empty', t.value.trim() === '');
+        // 末尾行に文字が入ったら次行を追加
+        const isLast = idx === wizardData.pendingRows.length - 1;
+        if (isLast && t.value.trim() !== '') {
+          wizardData.pendingRows.push({ tempId: uid(), grade: '', class: '', subject: '' });
+          renderRows();
+          // フォーカス維持のため少し遅らせて元に戻す
+          setTimeout(() => {
+            const sameRow = tbody.querySelector(`tr[data-idx="${idx}"] input[data-field="subject"]`);
+            if (sameRow) {
+              sameRow.focus();
+              sameRow.setSelectionRange(sameRow.value.length, sameRow.value.length);
+            }
+          }, 0);
+        }
+        const filled = wizardData.pendingRows.filter(r => (r.subject||'').trim() !== '').length;
+        $('#wiz-asg-count').textContent = `入力済み ${filled}件`;
+      }
+    }
+  });
+  tbody.addEventListener('change', e => {
+    const t = e.target;
+    if (t.matches('select')) {
+      const tr = t.closest('tr');
+      const idx = +tr.dataset.idx;
+      wizardData.pendingRows[idx][t.dataset.field] = t.value;
+      // プレースホルダ表示の解除
+      t.classList.toggle('is-placeholder', !t.value);
+    }
+  });
+  tbody.addEventListener('click', e => {
+    const del = e.target.closest('.wiz-row-del');
+    if (!del) return;
+    const tr = del.closest('tr');
+    const idx = +tr.dataset.idx;
+    if (wizardData.pendingRows.length <= 1) {
+      wizardData.pendingRows[idx] = { tempId: uid(), grade: '', class: '', subject: '' };
+    } else {
+      wizardData.pendingRows.splice(idx, 1);
+    }
+    renderRows();
+  });
+  $('#wiz-asg-add').onclick = () => {
+    wizardData.pendingRows.push({ tempId: uid(), grade: '', class: '', subject: '' });
+    renderRows();
+  };
+  $('#wiz-new-year').addEventListener('input', e => {
+    wizardData.newYear = e.target.value;
+  });
+
+  wizardCommit = async () => {
+    const ny = (wizardData.newYear || '').trim();
+    if (!ny || isNaN(+ny)) { toast('新しい年度を入力してください', 'error'); return false; }
+    const filledRows = wizardData.pendingRows
+      .map(r => ({ ...r, subject: (r.subject||'').trim() }))
+      .filter(r => r.subject !== '');
+    if (filledRows.length === 0) { toast('担当授業を1件以上入力してください', 'error'); return false; }
+    // 学年・クラス未選択チェック
+    const incomplete = filledRows.find(r => !r.grade || !r.class);
+    if (incomplete) {
+      toast(`「${incomplete.subject}」の学年・クラスを選択してください`, 'error');
+      return false;
+    }
+    // 重複チェック
+    const seen = new Set();
+    for (const r of filledRows) {
+      const key = `${r.grade}|${r.class}|${r.subject}`;
+      if (seen.has(key)) {
+        toast(`重複: ${r.grade}年${r.class==='混在'?'混在':r.class+'組'}${r.subject}`, 'error');
+        return false;
+      }
+      seen.add(key);
+    }
+    // 確認ダイアログ（async版）
+    const msg =
+      `現在の ${state.year}年度のデータを全て初期化し、${ny}年度に切り替えます。\n\n` +
+      `・担当授業: ${filledRows.length}件 を新規登録\n` +
+      `・名簿・出欠データは空になります\n` +
+      (wizardData.archiveOption !== 'archive'
+        ? '\n⚠️ 今回のウィザードで「アーカイブ」を実行していません。本当に進めますか？\n'
+        : '') +
+      `\nよろしいですか？`;
+    const ok = await confirmDialogAsync('新年度への切替確認', msg);
+    if (!ok) return false;
+    // 実行：データ初期化 → 年度更新 → 担当授業を一括追加
+    state.year = String(+ny);
+    state.assignments = [];
+    state.rosters = {};
+    state.attendance = {};
+    wizardData.createdAssignmentIds = [];
+    filledRows.forEach(r => {
+      const id = uid();
+      state.assignments.push({
+        id, year: state.year, grade: +r.grade, class: r.class, subject: r.subject,
+      });
+      wizardData.createdAssignmentIds.push(id);
+    });
+    save();
+    $('#year-info').textContent = `${state.year}年度`;
+    wizardApplied.step3 = true;
+    toast(`${state.year}年度に切替・担当授業 ${filledRows.length}件 を登録しました`, 'success');
+    return true;
+  };
+}
+
+// ===== Step 4: 名簿登録 =====
+function renderWizStep4(c) {
+  // step3を実行済の場合は createdAssignmentIds、未実行なら現在の全担当授業
+  const targetIds = wizardApplied.step3 && wizardData.createdAssignmentIds.length
+    ? wizardData.createdAssignmentIds
+    : state.assignments.map(a => a.id);
+  const targets = targetIds.map(id => state.assignments.find(a => a.id === id)).filter(Boolean);
+
+  c.innerHTML = `
+    <h3>④ 各クラスの名簿を登録 ${wizardApplied.step4 ? '<span class="wizard-applied">✓ 完了</span>' : ''}</h3>
+    <p class="hint">下記の各授業の「名簿登録」ボタンを押して、生徒名簿を登録してください。<br>
+    すべて登録しなくても次へ進めます。後から「⚙️ 登録情報」タブで追加・修正できます。</p>
+    <div class="wiz-roster-list" id="wiz-roster-list"></div>
+  `;
+
+  const renderList = () => {
+    const list = $('#wiz-roster-list');
+    list.innerHTML = '';
+    if (targets.length === 0) {
+      list.innerHTML = '<p class="empty-msg">対象の担当授業がありません。</p>';
+      return;
+    }
+    targets.forEach(asg => {
+      const rosCount = state.rosters[asg.id]?.length || 0;
+      const item = document.createElement('div');
+      item.className = 'wiz-roster-item' + (rosCount > 0 ? ' has-roster' : '');
+      item.innerHTML = `
+        <span class="wiz-roster-label">${escape(getAssignmentLabel(asg))}</span>
+        <span class="wiz-roster-status">${rosCount > 0 ? `✓ ${rosCount}名 登録済` : '未登録'}</span>
+        <button data-id="${asg.id}" class="${rosCount > 0 ? '' : 'primary'}">${rosCount > 0 ? '📝 編集' : '📋 名簿登録'}</button>
+      `;
+      list.appendChild(item);
+    });
+    list.onclick = e => {
+      const btn = e.target.closest('button[data-id]');
+      if (!btn) return;
+      openRosterModal(btn.dataset.id);
+      // モーダル保存→閉じた後にリスト再描画されるよう、保存ボタンに監視を仕込まないと無理。
+      // 代替策：モーダル閉鎖を監視せず、フォーカス戻り時に再描画する
+      const checkInterval = setInterval(() => {
+        if ($('#roster-modal').classList.contains('hidden')) {
+          clearInterval(checkInterval);
+          renderList();
+        }
+      }, 400);
+    };
+  };
+  renderList();
+
+  wizardCommit = () => {
+    wizardApplied.step4 = true;
+    return true;
+  };
+}
+
+// ===== Step 5: 完了 =====
+function renderWizStep5(c) {
+  const asgN = state.assignments.length;
+  const rosN = state.assignments.filter(a => (state.rosters[a.id]?.length || 0) > 0).length;
+  c.innerHTML = `
+    <h3>⑤ 完了</h3>
+    <div class="wizard-current-info">
+      🎉 <strong>${escape(state.year)}年度</strong> の準備が完了しました。
+    </div>
+    <h4>登録内容のまとめ</h4>
+    <ul>
+      <li>年度: <strong>${escape(state.year)}年度</strong></li>
+      <li>担当授業: <strong>${asgN}件</strong></li>
+      <li>名簿登録済の授業: <strong>${rosN}件 / ${asgN}件</strong></li>
+      ${wizardApplied.step2 ? '<li>✓ 前年度のアーカイブを保存しました</li>' : ''}
+    </ul>
+    <p class="hint">「🎉 終了する」を押すと当日入力タブへ移動します。<br>
+    名簿が未登録の授業は「⚙️ 登録情報」タブから後で登録できます。</p>
+  `;
+  wizardCommit = () => {
+    resetWizardOnFinish();
+    showView('today');
+    toast('年度更新が完了しました', 'success');
+    return true;
+  };
 }
 function renderArchivesList() {
   const area = $('#archives-list');
@@ -1296,6 +1696,24 @@ function confirmDialog(title, message, onOk) {
   const close = () => modal.classList.add('hidden');
   $('#confirm-ok').onclick = () => { close(); onOk && onOk(); };
   $('#confirm-cancel').onclick = close;
+}
+
+// async版：true=OK, false=キャンセル（背景クリック含む）
+function confirmDialogAsync(title, message) {
+  return new Promise(resolve => {
+    let resolved = false;
+    const safeResolve = (v) => { if (!resolved) { resolved = true; cleanup(); resolve(v); } };
+    const cancelBtn = $('#confirm-cancel');
+    const backdrop = $('#confirm-modal .modal-backdrop');
+    const onCancel = () => safeResolve(false);
+    const cleanup = () => {
+      cancelBtn.removeEventListener('click', onCancel);
+      backdrop.removeEventListener('click', onCancel);
+    };
+    cancelBtn.addEventListener('click', onCancel);
+    backdrop.addEventListener('click', onCancel);
+    confirmDialog(title, message, () => safeResolve(true));
+  });
 }
 
 // =====================================================
@@ -1470,7 +1888,7 @@ function bindEvents() {
     confirmDialog('キャンセル確認', '編集内容を破棄しますか？', () => closeRosterModal());
   });
 
-  // 年度更新
+  // 年度更新：任意の即時アーカイブ
   $('#archive-now').addEventListener('click', () => {
     const name = $('#archive-name').value.trim() || `${state.year}年度_${pad2(new Date().getMonth()+1)}${pad2(new Date().getDate())}`;
     const arc = createArchive(name);
@@ -1478,24 +1896,27 @@ function bindEvents() {
     renderArchivesList();
     toast(`アーカイブ「${arc.name}」を保存しました`, 'success');
   });
-  $('#start-new-year').addEventListener('click', () => {
-    const ny = $('#new-year').value;
-    if (!ny) { toast('新年度を入力してください', 'error'); return; }
-    confirmDialog('新年度に切り替え',
-      `現在の ${state.year}年度をアーカイブし、新しい ${ny}年度に切り替えます。\n\n` +
-      `・現在の担当授業・名簿・出欠データはアーカイブとして保存されます\n` +
-      `・切り替え後、担当授業と名簿は空になります\n` +
-      `・アーカイブはいつでも閲覧・ダウンロードできます\n\n本当に切り替えますか？`, () => {
-      createArchive(`${state.year}年度（年度更新時）`);
-      state.year = String(ny);
-      state.assignments = [];
-      state.rosters = {};
-      state.attendance = {};
-      save();
-      $('#year-info').textContent = `${state.year}年度`;
-      refreshYearUpdateView();
-      toast(`${ny}年度に切り替えました`, 'success');
-    });
+
+  // 年度更新ウィザード ナビゲーション
+  $('#wizard-back').addEventListener('click', () => {
+    if (wizardStep > 1) { wizardStep--; renderWizard(); }
+  });
+  $('#wizard-skip').addEventListener('click', () => {
+    if (wizardStep < 5) { wizardStep++; renderWizard(); }
+  });
+  $('#wizard-next').addEventListener('click', async () => {
+    if (typeof wizardCommit === 'function') {
+      const result = await Promise.resolve(wizardCommit());
+      if (result === false) return;
+    }
+    if (wizardStep === 5) {
+      // Step5のcommitが showView('today') を呼ぶので、ここでは何もしない
+      return;
+    }
+    if (wizardStep < 5) {
+      wizardStep++;
+      renderWizard();
+    }
   });
 
   // データ管理
