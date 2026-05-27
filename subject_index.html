@@ -206,37 +206,38 @@
   </div>
 </section>
 
-<!-- ===== 年度更新 ===== -->
+<!-- ===== 年度更新ウィザード ===== -->
 <section id="view-yearupdate" class="view hidden">
-  <h2>🔄 年度更新・アーカイブ</h2>
+  <h2>🔄 年度更新ウィザード</h2>
+  <p class="hint">5つのステップで新年度の準備が完了します。各ステップで「スキップ」もできます。<br>
+  途中で中断しても、いつでもこのタブに戻って続きから再開できます。</p>
 
-  <div class="card">
-    <h3>📦 現在の年度をアーカイブ</h3>
-    <p class="hint">現在の年度の全データ（担当授業・名簿・出欠データ）をアーカイブとして保存します。<br>
-    アーカイブ後も現在のデータは残ります。年度途中の定期バックアップにも使えます。</p>
-    <div class="row">
-      <label>アーカイブ名（任意）:
-        <input type="text" id="archive-name" placeholder="例: 2025年度_期末">
-      </label>
-      <button id="archive-now" class="primary">📦 今すぐアーカイブ</button>
+  <div class="wizard-progress" id="wizard-progress"></div>
+  <div class="wizard-step-area" id="wizard-content"></div>
+  <div class="wizard-nav">
+    <button id="wizard-back">◀ 戻る</button>
+    <div class="right">
+      <button id="wizard-skip">スキップ</button>
+      <button id="wizard-next" class="primary">次へ ▶</button>
     </div>
   </div>
 
-  <div class="card">
+  <!-- 既存アーカイブ一覧（ウィザードと独立） -->
+  <div class="card" style="margin-top: 24px;">
     <h3>📂 アーカイブ一覧</h3>
-    <p class="hint">過去のアーカイブを一覧表示します。閲覧・復元・削除ができます。</p>
+    <p class="hint">過去のアーカイブをいつでも確認・ダウンロード・削除できます。</p>
     <div id="archives-list"></div>
   </div>
 
-  <div class="card">
-    <h3>🆕 新年度に切り替え</h3>
-    <p class="hint">現在のデータをアーカイブしたうえで、担当授業・出欠データを初期化し、新年度の準備を行います。<br>
-    （名簿のひな形は引き継ぎません。担当授業から登録し直してください。）</p>
+  <!-- アーカイブ即時バックアップ（任意。年度途中の保存用） -->
+  <div class="card" style="background:var(--pill-bg);">
+    <h3>💾 今すぐアーカイブ（任意）</h3>
+    <p class="hint">年度の途中でも定期的なバックアップとして「現在の状態」のスナップショットを残せます。</p>
     <div class="row">
-      <label>新しい年度:
-        <input type="number" id="new-year" min="2020" max="2099">
+      <label>アーカイブ名（任意）:
+        <input type="text" id="archive-name" placeholder="例: 2026年度_中間">
       </label>
-      <button id="start-new-year" class="danger">🆕 新年度に切り替え（要確認）</button>
+      <button id="archive-now">📦 今すぐアーカイブ</button>
     </div>
   </div>
 </section>
