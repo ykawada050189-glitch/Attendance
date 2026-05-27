@@ -522,6 +522,173 @@ tr.row-absent   { background: var(--c-absent-bg); }
 .storage-bar-fill.s-warn { background: #d68910; }
 .storage-bar-fill.s-danger { background: var(--c-absent); }
 
+/* ===== 年度更新ウィザード ===== */
+.wizard-progress {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 20px;
+  flex-wrap: wrap;
+}
+.wizard-progress .step {
+  flex: 1;
+  padding: 10px 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 90px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.wizard-progress .step:hover { background: var(--hover); }
+.wizard-progress .step.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary-hover);
+  font-weight: bold;
+}
+.wizard-progress .step.done {
+  background: var(--c-official);
+  color: #fff;
+  border-color: var(--c-official);
+}
+.wizard-progress .step .step-num {
+  display: inline-block;
+  margin-right: 4px;
+  font-weight: bold;
+}
+.wizard-step-area {
+  background: var(--card-bg);
+  border-radius: 6px;
+  padding: 18px;
+  box-shadow: var(--card-shadow);
+  margin-bottom: 16px;
+}
+.wizard-step-area h3 { margin-top: 0; color: var(--primary); }
+.wizard-step-area h4 { margin: 14px 0 6px; font-size: 14px; color: var(--text); }
+.wizard-current-info {
+  background: var(--pill-bg);
+  border-left: 3px solid var(--primary);
+  padding: 10px 14px;
+  margin: 10px 0;
+  font-size: 13px;
+  border-radius: 4px;
+}
+.wizard-choice-block {
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  margin: 10px 0;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.wizard-choice-block:hover { border-color: var(--primary); background: var(--hover); }
+.wizard-choice-block.selected { border-color: var(--primary); background: var(--accent-light); }
+.wizard-choice-block h4 { margin: 0 0 6px; }
+.wizard-choice-block.danger { border-color: var(--c-absent); }
+.wizard-choice-block.danger:hover { background: var(--c-absent-bg); }
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.wizard-nav .right { display: flex; gap: 8px; }
+.wizard-applied {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: var(--c-official);
+  color: #fff;
+  font-size: 11px;
+  border-radius: 10px;
+}
+
+/* ウィザード ステップ3：複数担当授業の入力テーブル */
+.wiz-asg-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  /* 列幅を固定化（指定列はそのまま、残りを授業名へ） */
+  table-layout: fixed;
+}
+.wiz-asg-table th, .wiz-asg-table td {
+  padding: 6px 6px;
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+.wiz-asg-table th {
+  background: var(--table-head);
+  font-size: 12px;
+  text-align: center;
+  font-weight: 600;
+}
+/* 学年・クラスを広めに、授業名は残り、削除は最小幅 */
+.wiz-asg-table .col-grade  { width: 140px; }
+.wiz-asg-table .col-class  { width: 170px; }
+.wiz-asg-table .col-del    { width: 44px; text-align: center; }
+.wiz-asg-table select, .wiz-asg-table input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+}
+.wiz-asg-table .wiz-row-del {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 18px;
+  cursor: pointer;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  padding: 0;
+  min-height: auto;
+}
+.wiz-asg-table .wiz-row-del:hover { background: var(--c-absent-bg); }
+.wiz-asg-table tr.wiz-row-empty input[type="text"] {
+  background: transparent;
+  border-style: dashed;
+}
+/* 学年・クラスが未選択（プレースホルダ）状態のグレー表示 */
+.wiz-asg-table select.is-placeholder {
+  color: var(--text-muted);
+  background: transparent;
+  border-style: dashed;
+}
+.wiz-asg-table select option { color: var(--text); background: var(--card-bg); }
+.wiz-asg-table select option[disabled] { color: var(--text-muted); }
+
+/* ウィザード ステップ4：登録済み授業一覧（名簿登録用） */
+.wiz-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.wiz-roster-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--pill-bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: 4px;
+  flex-wrap: wrap;
+}
+.wiz-roster-item.has-roster { border-left-color: var(--c-official); }
+.wiz-roster-item .wiz-roster-label { flex: 1; font-weight: 600; min-width: 180px; }
+.wiz-roster-item .wiz-roster-status {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-muted);
+}
+.wiz-roster-item.has-roster .wiz-roster-status {
+  background: var(--c-official);
+  color: #fff;
+}
+
 /* ===== アーカイブ ===== */
 .archive-item {
   background: var(--pill-bg);
@@ -537,6 +704,68 @@ tr.row-absent   { background: var(--c-absent-bg); }
 .archive-item .archive-meta { flex: 1; min-width: 200px; font-size: 13px; }
 .archive-item .archive-meta .archive-name { font-weight: bold; }
 .archive-item .archive-meta .archive-date { color: var(--text-muted); font-size: 12px; }
+
+/* ===== 出欠登録 フローティングアクションバー（画面右下に常時固定） ===== */
+.roster-action-fab {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  z-index: 80;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 36px;
+  box-shadow: 0 6px 22px rgba(0, 70, 30, 0.20);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.roster-action-fab button {
+  min-height: 48px;
+  padding: 11px 22px;
+  font-size: 15px;
+  border-radius: 24px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
+}
+.roster-action-fab button.primary {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 12px 28px;
+}
+.roster-action-fab button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+[data-theme="dark"] .roster-action-fab {
+  background: rgba(35, 45, 38, 0.95);
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+
+/* FABに隠れないようコンテンツ下部に余白を確保 */
+#view-today, #view-past {
+  padding-bottom: 100px;
+}
+
+@media (max-width: 768px) {
+  .roster-action-fab {
+    bottom: 12px;
+    right: 12px;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .roster-action-fab button {
+    min-height: 44px;
+    padding: 9px 16px;
+    font-size: 14px;
+  }
+  .roster-action-fab button.primary {
+    font-size: 15px;
+    padding: 10px 20px;
+  }
+}
 
 /* ===== トースト ===== */
 #toast {
@@ -818,6 +1047,7 @@ tr.row-absent   { background: var(--c-absent-bg); }
   header, nav, .header-tools, .nav-btn,
   .modal, #toast,
   button, .copy-btn, .row, .hint,
+  .roster-action-fab,
   .view.hidden { display: none !important; }
 
   /* 印刷時にも表示するべきもの */
