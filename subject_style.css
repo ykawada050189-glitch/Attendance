@@ -145,6 +145,23 @@ header h1 {
 #storage-indicator.s-warn { background: #d68910; color: #fff; }
 #storage-indicator.s-danger { background: #c0392b; color: #fff; }
 
+/* バックアップ経過日数インジケータ */
+#backup-age-indicator {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.12);
+  color: #c8e6c9;
+  white-space: nowrap;
+  border: none;
+  min-height: auto;
+  cursor: pointer;
+}
+#backup-age-indicator.safe   { background: rgba(255,255,255,0.12); color: #c8e6c9; }
+#backup-age-indicator.warn   { background: #d68910; color: #fff; }
+#backup-age-indicator.danger { background: #c0392b; color: #fff; }
+
+
 /* ===== ナビ ===== */
 nav {
   margin-top: 10px;
@@ -705,66 +722,98 @@ tr.row-absent   { background: var(--c-absent-bg); }
 .archive-item .archive-meta .archive-name { font-weight: bold; }
 .archive-item .archive-meta .archive-date { color: var(--text-muted); font-size: 12px; }
 
-/* ===== 出欠登録 フローティングアクションバー（画面右下に常時固定） ===== */
-.roster-action-fab {
+/* ===== 出欠登録 アクションバー（出欠サマリ + 登録ボタン、画面下部に常時固定） ===== */
+.roster-action-bar {
   position: fixed;
-  bottom: 22px;
-  right: 22px;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
   z-index: 80;
   display: flex;
-  gap: 10px;
   align-items: center;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.96);
+  gap: 14px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.97);
   border: 1px solid var(--border);
   border-radius: 36px;
   box-shadow: 0 6px 22px rgba(0, 70, 30, 0.20);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
-.roster-action-fab button {
-  min-height: 48px;
-  padding: 11px 22px;
-  font-size: 15px;
+.action-bar-summary {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.action-bar-buttons {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.roster-action-bar button {
+  min-height: 46px;
+  padding: 10px 18px;
+  font-size: 14px;
   border-radius: 24px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
 }
-.roster-action-fab button.primary {
-  font-size: 16px;
+.roster-action-bar button.primary {
+  font-size: 15px;
   font-weight: bold;
-  padding: 12px 28px;
+  padding: 11px 22px;
 }
-.roster-action-fab button:hover:not(:disabled) {
+.roster-action-bar button:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
 }
-[data-theme="dark"] .roster-action-fab {
-  background: rgba(35, 45, 38, 0.95);
+[data-theme="dark"] .roster-action-bar {
+  background: rgba(35, 45, 38, 0.96);
   border-color: var(--border-strong);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
 }
 
-/* FABに隠れないようコンテンツ下部に余白を確保 */
+/* アクションバーに隠れないようコンテンツ下部に余白を確保 */
 #view-today, #view-past {
-  padding-bottom: 100px;
+  padding-bottom: 110px;
 }
 
+/* レスポンシブ：狭い画面では上下2段に */
 @media (max-width: 768px) {
-  .roster-action-fab {
-    bottom: 12px;
-    right: 12px;
+  .roster-action-bar {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
     padding: 8px 10px;
-    gap: 6px;
+    gap: 8px;
+    border-radius: 18px;
+    flex-direction: column;
+    align-items: stretch;
   }
-  .roster-action-fab button {
-    min-height: 44px;
-    padding: 9px 16px;
+  .action-bar-summary {
+    justify-content: center;
+    font-size: 11px;
+  }
+  .action-bar-buttons {
+    justify-content: flex-end;
+  }
+  .roster-action-bar button {
+    min-height: 42px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .roster-action-bar button.primary {
     font-size: 14px;
+    padding: 9px 18px;
   }
-  .roster-action-fab button.primary {
-    font-size: 15px;
-    padding: 10px 20px;
-  }
+  #view-today, #view-past { padding-bottom: 160px; }
 }
 
 /* ===== トースト ===== */
@@ -1041,39 +1090,90 @@ tr.row-absent   { background: var(--c-absent-bg); }
 #student-history-body .history-table th { background: var(--table-head); font-size: 12px; }
 #student-history-body .history-table td.status-cell { text-align: center; font-weight: bold; }
 
-/* ===== 印刷スタイル（集計・コピー画面の印刷向け最適化） ===== */
+/* ===== 印刷スタイル（A4縦・1ページ収まり最適化） ===== */
 @media print {
-  /* 隠す */
+  /* A4縦・余白を最小限に */
+  @page { size: A4 portrait; margin: 6mm; }
+
+  html, body {
+    background: white !important;
+    color: black !important;
+    margin: 0; padding: 0;
+    /* 行数に応じてJSが --print-base-pt を設定（既定9pt） */
+    font-size: var(--print-base-pt, 9pt);
+    line-height: 1.25;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 隠す要素 */
   header, nav, .header-tools, .nav-btn,
   .modal, #toast,
   button, .copy-btn, .row, .hint,
-  .roster-action-fab,
-  .view.hidden { display: none !important; }
+  .roster-action-bar,
+  .view.hidden,
+  h2 { display: none !important; }
 
-  /* 印刷時にも表示するべきもの */
+  /* 集計表内の操作要素は隠す */
   .export-table button,
   .export-table .total-row,
   .export-table .copy-btn { display: none !important; }
 
-  body, html { background: white !important; color: black !important; font-size: 11pt; }
-  main { padding: 0; max-width: none; }
-  .card { box-shadow: none !important; border: 1px solid #888; page-break-inside: avoid; }
-  .card h3 { color: black !important; }
-  h2 { margin-top: 0; }
-  .export-table { width: 100%; border-collapse: collapse; }
+  /* 集計画面の操作カード（最初のcard）は印刷しない */
+  #view-export > .card:first-of-type { display: none !important; }
+
+  main { padding: 0; max-width: none; margin: 0; }
+  .card {
+    box-shadow: none !important;
+    border: none;
+    padding: 0;
+    margin: 0 0 3mm 0;
+    page-break-inside: avoid;
+    background: white !important;
+  }
+  .card h3 {
+    color: black !important;
+    margin: 0 0 2mm 0;
+    font-size: 1.25em;
+    border-bottom: 1px solid #444;
+    padding-bottom: 1mm;
+  }
+
+  /* 印刷専用ヘッダ */
+  .print-header {
+    display: block !important;
+    margin-bottom: 3mm;
+    padding: 1.5mm 3mm;
+    background: #f5f5f5 !important;
+    border-left: 3px solid #444;
+    font-size: 1em;
+  }
+
+  /* 集計テーブルをコンパクトに（body の font-size を継承） */
+  .export-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1em;
+  }
   .export-table th, .export-table td {
-    border: 1px solid #333 !important;
-    padding: 4px 8px !important;
+    border: 1px solid #444 !important;
+    padding: 1.5pt 4pt !important;
     background: white !important;
     color: black !important;
+    line-height: 1.25;
   }
-  .export-table th { font-weight: bold; background: #eee !important; }
-  /* 印刷ヘッダ */
-  .print-header { display: block !important; margin-bottom: 10px; }
-  /* 集計画面の操作カードと見出しは印刷しない */
-  #view-export > h2,
-  #view-export > .card:first-of-type { display: none !important; }
-  @page { size: A4 portrait; margin: 12mm; }
+  .export-table th {
+    font-weight: bold;
+    background: #e8e8e8 !important;
+    font-size: 0.95em;
+  }
+  .export-table .col-no { width: 8mm; }
+  .export-table .col-name { width: 32mm; }
+
+  /* 改ページを避ける */
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  tbody tr { page-break-inside: avoid; }
 }
 .print-header { display: none; }
 
