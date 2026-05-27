@@ -156,6 +156,7 @@ const DEFAULT_RULES = {
 
 // ----- ストレージ -----
 const STORAGE_KEY = 'attendance-app-v1';
+const STORAGE_KEY_BACKUP = STORAGE_KEY + '_backup';
 const THEME_KEY = 'attendance-app-theme';
 
 function defaultState() {
@@ -168,25 +169,81 @@ function defaultState() {
     attendance: {},
     overrides: {},
     subjectsByGrade: { '1': [], '2': [], '3': [] }, // プルダウン用の教科候補(学年別)
+    lastExportAt: null,
   };
 }
 function loadAll() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultState();
-    return { ...defaultState(), ...JSON.parse(raw) };
-  } catch (e) { return defaultState(); }
+  // メインキー優先、なければバックアップから復元
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+  if (raw) {
+    try { return { ...defaultState(), ...JSON.parse(raw) }; }
+    catch (e) { console.error('main parse failed', e); }
+  }
+  let backup = null;
+  try { backup = localStorage.getItem(STORAGE_KEY_BACKUP); } catch (e) {}
+  if (backup) {
+    try {
+      const parsed = { ...defaultState(), ...JSON.parse(backup) };
+      try { localStorage.setItem(STORAGE_KEY, backup); } catch (e) {}
+      window._restoredFromBackup = true;
+      return parsed;
+    } catch (e) { console.error('backup parse failed', e); }
+  }
+  return defaultState();
 }
 function saveAll() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY, json);
+    // === 二重化バックアップ（メインキー破損対策） ===
+    try { localStorage.setItem(STORAGE_KEY_BACKUP, json); } catch (e) {}
     markSaved();
     updateStorageIndicator();
+    if (typeof updateSafetyIndicators === 'function') updateSafetyIndicators();
   } catch (e) {
     toast('保存失敗（容量超過の可能性）: ' + e.message, 'error');
     updateStorageIndicator();
   }
 }
+
+// ===== データ保護：永続化要求 =====
+async function ensurePersistentStorage() {
+  if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
+    window._isPersisted = null; return null;
+  }
+  try {
+    const persisted = await navigator.storage.persisted();
+    if (persisted) { window._isPersisted = true; return true; }
+    const granted = await navigator.storage.persist();
+    window._isPersisted = !!granted;
+    return granted;
+  } catch (e) {
+    console.warn('persist request failed:', e);
+    window._isPersisted = false; return false;
+  }
+}
+
+// ===== データ保護：インジケータ更新（バックアップ経過日数のみ） =====
+function updateSafetyIndicators() {
+  const bEl = document.getElementById('backup-age-indicator');
+  if (bEl) {
+    bEl.classList.remove('safe','warn','danger');
+    if (!state.lastExportAt) {
+      bEl.textContent = '💾 未保存';
+      bEl.classList.add('warn');
+      bEl.title = 'まだJSONバックアップを取っていません。\nクリックで今すぐエクスポートできます。';
+    } else {
+      const days = Math.floor((Date.now() - new Date(state.lastExportAt).getTime()) / (1000*60*60*24));
+      bEl.textContent = `💾 ${days}日`;
+      if (days >= 30) bEl.classList.add('danger');
+      else if (days >= 14) bEl.classList.add('warn');
+      else bEl.classList.add('safe');
+      bEl.title = `最後のJSONバックアップから ${days}日経過\n（${new Date(state.lastExportAt).toLocaleString('ja-JP')}）\nクリックで今すぐエクスポート。`;
+    }
+  }
+}
+
 let state = loadAll();
 
 // 旧形式の移行
@@ -391,7 +448,7 @@ async function archiveYear(year) {
     overrides: yearOverrides,
   };
   const json = JSON.stringify(archive, null, 2);
-  const filename = `attendance-${year}年度-${getClassName()}-${ymd(new Date())}.json`;
+  const filename = `class_attendance-${year}年度-${getClassName()}-${ymd(new Date())}.json`;
 
   // 1) 保存先選択ダイアログ（対応ブラウザ）
   let saved = false;
@@ -3013,12 +3070,20 @@ document.getElementById('rules-save').onclick = () => {
 
 // データ管理
 document.getElementById('data-export').onclick = () => {
+  // バックアップ取得時刻を記録（インジケータと安全バナーに反映）
+  state.lastExportAt = new Date().toISOString();
+  saveAll();
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `attendance-${ymd(new Date())}.json`; a.click();
+  a.href = url; a.download = `class_attendance-${ymd(new Date())}.json`; a.click();
   URL.revokeObjectURL(url);
+  if (typeof updateSafetyIndicators === 'function') updateSafetyIndicators();
 };
+// ヘッダ：バックアップアイコンクリック → 即エクスポート
+document.getElementById('backup-age-indicator')?.addEventListener('click', () => {
+  document.getElementById('data-export').click();
+});
 document.getElementById('data-import-file').addEventListener('change', (e) => {
   const f = e.target.files[0]; if (!f) return;
   if (!confirm('既存の全データを上書きします。よろしいですか？')) { e.target.value=''; return; }
@@ -3073,3 +3138,31 @@ updateClassInfoBar();
 showView('dashboard');
 markSaved();
 updateStorageIndicator();
+
+// データ保護：永続化要求 + インジケータ
+(async () => {
+  await ensurePersistentStorage();
+  updateSafetyIndicators();
+  if (window._restoredFromBackup) {
+    toast('メインデータが消失したためバックアップから復元しました', 'success');
+  }
+})();
+
+// 印刷時：A4縦1ページに収まるよう、表示中ビューの最大行数に応じてフォントサイズを自動調整
+window.addEventListener('beforeprint', () => {
+  let maxRows = 0;
+  document.querySelectorAll('.view:not(.hidden) table tbody').forEach(tb => {
+    const n = tb.querySelectorAll('tr').length;
+    if (n > maxRows) maxRows = n;
+  });
+  const basePt = 9;        // 基本フォントサイズ
+  const threshold = 45;    // この行数までは9pt
+  const minPt = 6;         // 縮小下限
+  const fontPt = maxRows > threshold
+    ? Math.max(minPt, basePt * threshold / maxRows)
+    : basePt;
+  document.documentElement.style.setProperty('--print-base-pt', `${fontPt.toFixed(2)}pt`);
+});
+window.addEventListener('afterprint', () => {
+  document.documentElement.style.removeProperty('--print-base-pt');
+});
