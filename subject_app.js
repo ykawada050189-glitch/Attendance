@@ -52,28 +52,52 @@ function toast(msg, type='') {
 }
 
 // ===== ストレージ =====
+const STORAGE_KEY_BACKUP = STORAGE_KEY + '_backup';
+
 function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    return migrate(parsed);
-  } catch (e) {
-    console.error('load failed', e);
-    toast('データ読み込みに失敗しました', 'error');
-    return defaultState();
+  // メインキーから読み込み。失敗または空ならバックアップから復元を試みる。
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+  if (raw) {
+    try { return migrate(JSON.parse(raw)); }
+    catch (e) {
+      console.error('main parse failed', e);
+      // 続けてバックアップ復元を試行
+    }
   }
+  // === バックアップから復元 ===
+  let backup = null;
+  try { backup = localStorage.getItem(STORAGE_KEY_BACKUP); } catch (e) {}
+  if (backup) {
+    try {
+      const parsed = migrate(JSON.parse(backup));
+      // メインに書き戻し
+      try { localStorage.setItem(STORAGE_KEY, backup); } catch(e) {}
+      // 起動後にユーザに通知
+      window._restoredFromBackup = true;
+      return parsed;
+    } catch (e) {
+      console.error('backup parse failed', e);
+    }
+  }
+  return defaultState();
 }
+
 function save() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY, json);
+    // === 二重化バックアップ（メインキー破損対策） ===
+    try { localStorage.setItem(STORAGE_KEY_BACKUP, json); } catch (e) {}
     updateSavedIndicator();
     updateStorageIndicator();
+    updateSafetyIndicators();
   } catch (e) {
     console.error('save failed', e);
     toast('保存に失敗しました（容量上限の可能性）', 'error');
   }
 }
+
 function defaultState() {
   return {
     v: 1,
@@ -83,8 +107,10 @@ function defaultState() {
     attendance: {},
     archives: [],
     lastSavedAt: null,
+    lastExportAt: null,
   };
 }
+
 function migrate(s) {
   // 将来のバージョン用
   if (!s.v) s = defaultState();
@@ -93,8 +119,49 @@ function migrate(s) {
   s.attendance = s.attendance || {};
   s.archives = s.archives || [];
   s.year = s.year || String(currentAY());
+  if (s.lastExportAt === undefined) s.lastExportAt = null;
   return s;
 }
+
+// ===== データ保護：永続化要求 =====
+async function ensurePersistentStorage() {
+  if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
+    window._isPersisted = null; // 非対応
+    return null;
+  }
+  try {
+    const persisted = await navigator.storage.persisted();
+    if (persisted) { window._isPersisted = true; return true; }
+    const granted = await navigator.storage.persist();
+    window._isPersisted = !!granted;
+    return granted;
+  } catch (e) {
+    console.warn('persist request failed:', e);
+    window._isPersisted = false;
+    return false;
+  }
+}
+
+// ===== データ保護：インジケータ更新（バックアップ経過日数のみ） =====
+function updateSafetyIndicators() {
+  const bEl = $('#backup-age-indicator');
+  if (bEl) {
+    bEl.classList.remove('safe','warn','danger');
+    if (!state.lastExportAt) {
+      bEl.textContent = '💾 未保存';
+      bEl.classList.add('warn');
+      bEl.title = 'まだJSONバックアップを取っていません。\nクリックで今すぐエクスポートできます。';
+    } else {
+      const days = Math.floor((Date.now() - new Date(state.lastExportAt).getTime()) / (1000*60*60*24));
+      bEl.textContent = `💾 ${days}日`;
+      if (days >= 30) bEl.classList.add('danger');
+      else if (days >= 14) bEl.classList.add('warn');
+      else bEl.classList.add('safe');
+      bEl.title = `最後のJSONバックアップから ${days}日経過\n（${new Date(state.lastExportAt).toLocaleString('ja-JP')}）\nクリックで今すぐエクスポート。`;
+    }
+  }
+}
+
 
 function updateSavedIndicator() {
   state.lastSavedAt = new Date().toISOString();
@@ -485,10 +552,7 @@ function loadRosterFor(targetAreaId, asgId, date, period) {
   `;
   card.appendChild(head);
 
-  // 出欠サマリ（リアルタイム更新）
-  const summary = document.createElement('div');
-  summary.className = 'attendance-summary';
-  card.appendChild(summary);
+  // 出欠サマリは画面下部の固定バーへ移動したため、ここには出さない
 
   // 一括操作バー
   const bulk = document.createElement('div');
@@ -534,15 +598,19 @@ function loadRosterFor(targetAreaId, asgId, date, period) {
   tbl.appendChild(tbody);
   card.appendChild(tbl);
 
-  // 登録ボタン（画面右下に固定表示）
+  // 画面下部固定バー：左側に出欠サマリ、右側に登録/削除ボタン
   const foot = document.createElement('div');
-  foot.className = 'roster-action-fab';
+  foot.className = 'roster-action-bar';
   foot.innerHTML = `
-    ${isEdit ? '<button class="danger" id="rosterDeleteBtn">この回を削除</button>' : ''}
-    <button class="primary" id="rosterSaveBtn">💾 登録する</button>
+    <div class="action-bar-summary attendance-summary"></div>
+    <div class="action-bar-buttons">
+      ${isEdit ? '<button class="danger" id="rosterDeleteBtn">この回を削除</button>' : ''}
+      <button class="primary" id="rosterSaveBtn">💾 登録する</button>
+    </div>
   `;
   card.appendChild(foot);
   area.appendChild(card);
+  const summary = foot.querySelector('.action-bar-summary');
 
   // === ヘルパ：行の警告バッジを再描画 ===
   function refreshRowWarning(tr, no, status) {
@@ -1778,7 +1846,27 @@ function bindEvents() {
       toast('先に「集計」を押してください', 'error');
       return;
     }
-    window.print();
+    window.print();   // 実際のスケール調整は beforeprint で
+  });
+
+  // Ctrl+P / 印刷ボタン どちらでもA4 1ページに収まるよう自動スケール
+  window.addEventListener('beforeprint', () => {
+    // 表示中ビューの中で最大の tbody 行数を取得
+    let maxRows = 0;
+    document.querySelectorAll('.view:not(.hidden) table tbody').forEach(tb => {
+      const n = tb.querySelectorAll('tr').length;
+      if (n > maxRows) maxRows = n;
+    });
+    const basePt = 9;        // 基本フォントサイズ
+    const threshold = 45;    // この行数までは9pt
+    const minPt = 6;         // 縮小下限
+    const fontPt = maxRows > threshold
+      ? Math.max(minPt, basePt * threshold / maxRows)
+      : basePt;
+    document.documentElement.style.setProperty('--print-base-pt', `${fontPt.toFixed(2)}pt`);
+  });
+  window.addEventListener('afterprint', () => {
+    document.documentElement.style.removeProperty('--print-base-pt');
   });
 
   // 生徒履歴モーダル
@@ -1921,9 +2009,14 @@ function bindEvents() {
 
   // データ管理
   $('#data-export').addEventListener('click', () => {
+    state.lastExportAt = new Date().toISOString();
+    save();
     downloadJson(`subject_attendance_${state.year}_${todayStr()}.json`, state);
     toast('エクスポートしました', 'success');
+    updateSafetyIndicators();
   });
+  // ヘッダ：バックアップアイコンクリック → 即エクスポート
+  $('#backup-age-indicator').addEventListener('click', () => $('#data-export').click());
   $('#data-import-file').addEventListener('change', e => {
     const f = e.target.files[0];
     if (!f) return;
@@ -1970,7 +2063,7 @@ function bindEvents() {
 // =====================================================
 // 起動
 // =====================================================
-function init() {
+async function init() {
   state = load();
   // テーマ
   const t = localStorage.getItem('lesson-att-theme');
@@ -1979,6 +2072,13 @@ function init() {
   bindEvents();
   showView('today');
   updateStorageIndicator();
+
+  // ===== データ保護：永続化要求 + インジケータ =====
+  await ensurePersistentStorage();
+  updateSafetyIndicators();
+  if (window._restoredFromBackup) {
+    toast('メインデータが消失したためバックアップから復元しました', 'success');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
