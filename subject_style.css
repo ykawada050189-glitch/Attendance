@@ -365,6 +365,24 @@ tr.row-absent   { background: var(--c-absent-bg); }
   font-size: 12px;
   font-weight: 600;
 }
+/* 学期別 授業時数 列 */
+#assignments-table .th-term { width: 78px; text-align: center; }
+#assignments-table .th-term .th-sub { font-weight: normal; font-size: 10px; color: var(--text-muted); }
+#assignments-table .th-total { background: var(--accent-light); }
+#assignments-table td.term-hours-cell { text-align: center; padding: 4px; }
+#assignments-table td.term-hours-cell input {
+  width: 60px;
+  text-align: center;
+  padding: 4px 6px;
+  font-size: 13px;
+}
+#assignments-table td.term-total-cell {
+  text-align: center;
+  font-weight: bold;
+  background: var(--pill-bg);
+  font-family: "Consolas", monospace;
+}
+#assignments-table td.term-total-cell.has-hours { color: var(--primary-hover); }
 
 /* ===== モーダル ===== */
 .modal {
