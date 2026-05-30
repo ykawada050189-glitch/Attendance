@@ -120,7 +120,40 @@ function migrate(s) {
   s.archives = s.archives || [];
   s.year = s.year || String(currentAY());
   if (s.lastExportAt === undefined) s.lastExportAt = null;
+  // 各 assignment に termHours フィールドを保証
+  s.assignments.forEach(a => {
+    if (!a.termHours || typeof a.termHours !== 'object') {
+      a.termHours = { 1: '', 2: '', 3: '' };
+    } else {
+      a.termHours[1] = a.termHours[1] ?? '';
+      a.termHours[2] = a.termHours[2] ?? '';
+      a.termHours[3] = a.termHours[3] ?? '';
+    }
+  });
   return s;
+}
+
+// ===== 学期判定 =====
+// 1学期=4-8月、2学期=9-12月、3学期=1-3月
+function getTermForDate(dateStr) {
+  if (!dateStr || dateStr.length < 7) return null;
+  const m = +dateStr.slice(5, 7);
+  if (m >= 4 && m <= 8) return 1;
+  if (m >= 9 && m <= 12) return 2;
+  if (m >= 1 && m <= 3) return 3;
+  return null;
+}
+function termRange(t) {
+  return t === 1 ? '4-8月' : t === 2 ? '9-12月' : t === 3 ? '1-3月' : '';
+}
+function hasTermHours(asg) {
+  const th = asg?.termHours;
+  if (!th) return false;
+  return [1,2,3].some(k => +th[k] > 0);
+}
+function getAnnualHours(asg) {
+  const th = asg?.termHours || {};
+  return (+th[1] || 0) + (+th[2] || 0) + (+th[3] || 0);
 }
 
 // ===== データ保護：永続化要求 =====
@@ -382,9 +415,11 @@ function renderTodayRegisteredList() {
 // 生徒の累計集計と「1/3 警告」ヘルパ
 // =====================================================
 // 指定 (担当授業, 生徒No) の保存済みデータから累計を算出
-function computeStudentRunningTotals(asgId, studentNo) {
+// asgObj が渡されれば、termHours に基づく学期情報も含めて返す
+function computeStudentRunningTotals(asgId, studentNo, asgObj) {
   const attData = state.attendance[asgId] || {};
   let totalSessions = 0, kk = 0, st = 0, mo = 0, ab = 0;
+  const termAbs = { 1: 0, 2: 0, 3: 0 };
   Object.keys(attData).forEach(date => {
     Object.keys(attData[date]).forEach(period => {
       totalSessions++;
@@ -392,20 +427,40 @@ function computeStudentRunningTotals(asgId, studentNo) {
       if (status === '公欠') kk++;
       else if (status === '出停') st++;
       else if (status === '忌引') mo++;
-      else if (status === '欠席') ab++;
+      else if (status === '欠席') {
+        ab++;
+        const t = getTermForDate(date);
+        if (t) termAbs[t]++;
+      }
     });
   });
   // 授業数（その生徒に対する）＝ 総実施回数 − 出停 − 忌引
   const classes = totalSessions - st - mo;
-  const limit = Math.floor(classes / 3);      // 1/3まで欠席できる回数（小数切り捨て）
-  const remaining = limit - ab;               // 1/3 ラインまでの残り回数
-  return {
-    totalSessions,
-    classes,
+  const limit = Math.floor(classes / 3);
+  const remaining = limit - ab;
+  const ns = {
+    totalSessions, classes,
     '公欠': kk, '出停': st, '忌引': mo, '欠席': ab,
-    limit,
-    remaining,
+    limit, remaining, termAbs,
   };
+  // 学期モード（termHours が入力されているとき）
+  if (asgObj && hasTermHours(asgObj)) {
+    const annualHours = getAnnualHours(asgObj);
+    ns.annual = {
+      hours: annualHours,
+      limit: Math.floor(annualHours / 3),
+      used: ab,
+      remaining: Math.floor(annualHours / 3) - ab,
+    };
+    ns.allTerms = [1, 2, 3].map(t => {
+      const hrs = +(asgObj.termHours[t]) || 0;
+      const used = termAbs[t] || 0;
+      const lim = Math.floor(hrs / 3);
+      return { num: t, hours: hrs, limit: lim, used, remaining: hrs > 0 ? lim - used : null };
+    });
+    ns.useTerms = true;
+  }
+  return ns;
 }
 
 // 警告レベル：'warn'(残り2) / 'danger'(残り1) / 'critical'(残り0以下) / null
@@ -441,7 +496,7 @@ function openStudentHistory(asgId, studentNo) {
   const stu = roster.find(s => s.no === studentNo);
   if (!stu) return;
 
-  const stats = computeStudentRunningTotals(asgId, studentNo);
+  const stats = computeStudentRunningTotals(asgId, studentNo, asg);
   const warnBadge = getWarnBadge(stats);
 
   // 出席以外の記録だけを抽出
@@ -453,6 +508,37 @@ function openStudentHistory(asgId, studentNo) {
       if (status) entries.push({ date, period: +period, status });
     });
   });
+
+  // 学期別ブロック（termHours 入力済みのときのみ）
+  let termHtml = '';
+  if (stats.useTerms && stats.allTerms) {
+    const termRows = stats.allTerms.map(t => {
+      if (t.hours === 0) {
+        return `<tr><td>${t.num}学期 (${termRange(t.num)})</td><td>—</td><td>${t.used}</td><td>—</td><td>—</td></tr>`;
+      }
+      const r = t.remaining;
+      const lvl = r <= 0 ? 'critical' : r <= 1 ? 'danger' : r <= 2 ? 'warn' : null;
+      const remTxt = r > 0 ? `あと${r}回` : r === 0 ? '限界' : `${-r}回超過`;
+      const remBadge = lvl ? `<span class="warn-badge warn-${lvl}">${remTxt}</span>` : `<span style="color:var(--text-muted);">あと${r}回</span>`;
+      return `<tr><td>${t.num}学期 (${termRange(t.num)})</td><td>${t.hours}</td><td>${t.used}</td><td>${t.limit}</td><td>${remBadge}</td></tr>`;
+    }).join('');
+    const aR = stats.annual.remaining;
+    const aLvl = aR <= 0 ? 'critical' : aR <= 2 ? 'danger' : aR <= 5 ? 'warn' : null;
+    const aRemTxt = aR > 0 ? `あと${aR}回` : aR === 0 ? '限界' : `${-aR}回超過`;
+    const aBadge = aLvl ? `<span class="warn-badge warn-${aLvl}">${aRemTxt}</span>` : `<span style="color:var(--text-muted);">あと${aR}回</span>`;
+    termHtml = `
+      <h4>学期別の欠課時数 (1/3 ライン)</h4>
+      <table class="history-table">
+        <thead><tr><th>学期</th><th>総時数</th><th>欠課</th><th>1/3ライン</th><th>残り</th></tr></thead>
+        <tbody>
+          ${termRows}
+          <tr style="background: var(--pill-bg); font-weight: bold;">
+            <td>年間合計</td><td>${stats.annual.hours}</td><td>${stats.annual.used}</td><td>${stats.annual.limit}</td><td>${aBadge}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  }
 
   $('#student-history-title').innerHTML =
     `📖 ${escape(stu.no)}番 ${escape(stu.name)} さんの履歴 ／ ${escape(getAssignmentLabel(asg))}`;
@@ -468,6 +554,7 @@ function openStudentHistory(asgId, studentNo) {
       <span class="sum-item has-count s-absent"><span class="lbl">欠席</span><span class="cnt">${stats['欠席']}</span></span>
       <span class="sum-total">1/3ライン ${stats.limit}回 ${warnBadge}</span>
     </div>
+    ${termHtml}
     <h4>欠席・公欠・出停・忌引の記録（${entries.length}件）</h4>
     ${entries.length === 0 ? '<p class="empty-msg">該当なし（全日出席）</p>' : `
       <table class="history-table">
@@ -490,6 +577,8 @@ function closeStudentHistory() { $('#student-history-modal').classList.add('hidd
 function computeStudentRunningTotalsExcluding(asgId, studentNo, excludeDate, excludePeriod) {
   const attData = state.attendance[asgId] || {};
   let totalSessions = 0, kk = 0, st = 0, mo = 0, ab = 0;
+  // 学期別の欠席カウント（出欠データの日付ベースで集計）
+  const termAbs = { 1: 0, 2: 0, 3: 0 };
   Object.keys(attData).forEach(date => {
     Object.keys(attData[date]).forEach(period => {
       if (date === excludeDate && +period === +excludePeriod) return;
@@ -498,14 +587,19 @@ function computeStudentRunningTotalsExcluding(asgId, studentNo, excludeDate, exc
       if (status === '公欠') kk++;
       else if (status === '出停') st++;
       else if (status === '忌引') mo++;
-      else if (status === '欠席') ab++;
+      else if (status === '欠席') {
+        ab++;
+        const t = getTermForDate(date);
+        if (t) termAbs[t]++;
+      }
     });
   });
-  return { totalSessions, '公欠': kk, '出停': st, '忌引': mo, '欠席': ab };
+  return { totalSessions, '公欠': kk, '出停': st, '忌引': mo, '欠席': ab, termAbs };
 }
 
 // 基礎累計 + 「今この行の状態」を合算して live 集計を返す
-function statsWithCurrentStatus(base, currentStatus) {
+// asg と currentDate を渡せば学期別の集計も含まれる
+function statsWithCurrentStatus(base, currentStatus, asg, currentDate) {
   const ns = {
     totalSessions: base.totalSessions + 1,
     '公欠': base['公欠'] + (currentStatus === '公欠' ? 1 : 0),
@@ -516,7 +610,96 @@ function statsWithCurrentStatus(base, currentStatus) {
   ns.classes = ns.totalSessions - ns['出停'] - ns['忌引'];
   ns.limit = Math.floor(ns.classes / 3);
   ns.remaining = ns.limit - ns['欠席'];
+
+  // === 学期別計算（asg.termHours が設定されている場合のみ）===
+  if (asg && hasTermHours(asg)) {
+    const annualHours = getAnnualHours(asg);
+    const annualLimit = Math.floor(annualHours / 3);
+    ns.annual = {
+      hours: annualHours,
+      limit: annualLimit,
+      used: ns['欠席'],
+      remaining: annualLimit - ns['欠席'],
+    };
+
+    const curTerm = getTermForDate(currentDate);
+    if (curTerm) {
+      const termHrs = +(asg.termHours[curTerm]) || 0;
+      const baseTermAb = (base.termAbs && base.termAbs[curTerm]) || 0;
+      // 現在の入力中の状態が「欠席」なら、現在の学期にも+1
+      const liveTermAb = baseTermAb + (currentStatus === '欠席' ? 1 : 0);
+      if (termHrs > 0) {
+        const termLimit = Math.floor(termHrs / 3);
+        ns.term = {
+          num: curTerm,
+          hours: termHrs,
+          limit: termLimit,
+          used: liveTermAb,
+          remaining: termLimit - liveTermAb,
+        };
+      }
+    }
+    ns.useTerms = true;
+  } else {
+    ns.useTerms = false;
+  }
   return ns;
+}
+
+// 警告レベルを統合判定（最大の severity を返す）
+function getCombinedWarnLevel(stats) {
+  if (!stats) return null;
+  // 学期モード時：年間 + 学期の警告を統合
+  if (stats.useTerms) {
+    const rank = { 'critical': 3, 'danger': 2, 'warn': 1 };
+    let max = 0, maxLvl = null;
+    // 年間: 残5以下 warn, 残2以下 danger, 残0以下 critical
+    if (stats.annual && stats.annual.hours > 0) {
+      const r = stats.annual.remaining;
+      const lvl = r <= 0 ? 'critical' : r <= 2 ? 'danger' : r <= 5 ? 'warn' : null;
+      if (lvl && rank[lvl] > max) { max = rank[lvl]; maxLvl = lvl; }
+    }
+    // 学期: 残2以下 warn, 残1以下 danger, 残0以下 critical
+    if (stats.term && stats.term.hours > 0) {
+      const r = stats.term.remaining;
+      const lvl = r <= 0 ? 'critical' : r <= 1 ? 'danger' : r <= 2 ? 'warn' : null;
+      if (lvl && rank[lvl] > max) { max = rank[lvl]; maxLvl = lvl; }
+    }
+    return maxLvl;
+  }
+  // 旧モード：既存の getWarnLevel（授業数<7なら無警告、それ以外は残2以下で警告）
+  return getWarnLevel(stats);
+}
+
+// 警告バッジHTML（複数バッジになる場合あり）
+function getCombinedWarnBadges(stats) {
+  if (!stats) return '';
+  if (!stats.useTerms) return getWarnBadge(stats);
+
+  let html = '';
+  // 年間
+  if (stats.annual && stats.annual.hours > 0) {
+    const r = stats.annual.remaining;
+    const lvl = r <= 0 ? 'critical' : r <= 2 ? 'danger' : r <= 5 ? 'warn' : null;
+    if (lvl) {
+      const remText = r > 0 ? `年間あと${r}回` : r === 0 ? '年間限界' : `年間${-r}回超過`;
+      const icon = lvl === 'critical' ? '❌' : '⚠️';
+      const tip = `年間総授業時数 ${stats.annual.hours}時数 ／ 欠課 ${stats.annual.used}回 ／ 1/3ライン ${stats.annual.limit}回`;
+      html += `<span class="warn-badge warn-${lvl}" title="${escape(tip)}">${icon} ${remText}</span>`;
+    }
+  }
+  // 学期
+  if (stats.term && stats.term.hours > 0) {
+    const r = stats.term.remaining;
+    const lvl = r <= 0 ? 'critical' : r <= 1 ? 'danger' : r <= 2 ? 'warn' : null;
+    if (lvl) {
+      const remText = r > 0 ? `${stats.term.num}学期あと${r}回` : r === 0 ? `${stats.term.num}学期限界` : `${stats.term.num}学期${-r}回超過`;
+      const icon = lvl === 'critical' ? '❌' : '⚠️';
+      const tip = `${stats.term.num}学期 (${termRange(stats.term.num)}) 総授業時数 ${stats.term.hours}時数 ／ 欠課 ${stats.term.used}回 ／ 1/3ライン ${stats.term.limit}回`;
+      html += `<span class="warn-badge warn-${lvl}" title="${escape(tip)}">${icon} ${remText}</span>`;
+    }
+  }
+  return html;
 }
 
 function loadRosterFor(targetAreaId, asgId, date, period) {
@@ -578,13 +761,13 @@ function loadRosterFor(targetAreaId, asgId, date, period) {
     const tr = document.createElement('tr');
     tr.dataset.no = stu.no;
     const current = existing[stu.no] || '出';
-    const liveStats = statsWithCurrentStatus(baseStats[stu.no], current);
-    const warnLevel = getWarnLevel(liveStats);
+    const liveStats = statsWithCurrentStatus(baseStats[stu.no], current, asg, date);
+    const warnLevel = getCombinedWarnLevel(liveStats);
     tr.className = 'row-' + STATUS_CLASS[current];
     if (warnLevel) tr.classList.add('has-warning-' + warnLevel);
     tr.innerHTML = `
       <td class="col-no">${escape(stu.no)}</td>
-      <td class="col-name">${escape(stu.name)}${getWarnBadge(liveStats)}</td>
+      <td class="col-name">${escape(stu.name)}${getCombinedWarnBadges(liveStats)}</td>
       <td class="col-status-btns">
         <div class="status-btns" data-no="${escape(stu.no)}">
           ${STATUSES.map(st => `
@@ -614,14 +797,14 @@ function loadRosterFor(targetAreaId, asgId, date, period) {
 
   // === ヘルパ：行の警告バッジを再描画 ===
   function refreshRowWarning(tr, no, status) {
-    const live = statsWithCurrentStatus(baseStats[no], status);
+    const live = statsWithCurrentStatus(baseStats[no], status, asg, date);
     tr.classList.remove('has-warning-warn','has-warning-danger','has-warning-critical');
-    const lvl = getWarnLevel(live);
+    const lvl = getCombinedWarnLevel(live);
     if (lvl) tr.classList.add('has-warning-' + lvl);
     const nameCell = tr.querySelector('.col-name');
-    const oldBadge = nameCell.querySelector('.warn-badge');
-    if (oldBadge) oldBadge.remove();
-    const newBadgeHtml = getWarnBadge(live);
+    // 全ての警告バッジを除去
+    nameCell.querySelectorAll('.warn-badge').forEach(b => b.remove());
+    const newBadgeHtml = getCombinedWarnBadges(live);
     if (newBadgeHtml) nameCell.insertAdjacentHTML('beforeend', newBadgeHtml);
   }
 
@@ -1092,16 +1275,22 @@ function renderAssignmentsTable() {
   const tbody = $('#assignments-tbody');
   tbody.innerHTML = '';
   if (state.assignments.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">担当授業が登録されていません。<br>上のフォームから追加してください。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-msg">担当授業が登録されていません。<br>上のフォームから追加してください。</td></tr>`;
     return;
   }
   state.assignments.forEach(a => {
     const roster = state.rosters[a.id] || [];
+    const th = a.termHours || { 1: '', 2: '', 3: '' };
+    const total = getAnnualHours(a);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escape(a.grade)}年</td>
       <td>${escape(a.class)}</td>
       <td>${escape(a.subject)}</td>
+      <td class="term-hours-cell"><input type="number" class="term-hours-input" data-id="${a.id}" data-term="1" min="0" max="999" value="${escape(th[1] ?? '')}" placeholder="-"></td>
+      <td class="term-hours-cell"><input type="number" class="term-hours-input" data-id="${a.id}" data-term="2" min="0" max="999" value="${escape(th[2] ?? '')}" placeholder="-"></td>
+      <td class="term-hours-cell"><input type="number" class="term-hours-input" data-id="${a.id}" data-term="3" min="0" max="999" value="${escape(th[3] ?? '')}" placeholder="-"></td>
+      <td class="term-total-cell ${total > 0 ? 'has-hours' : ''}">${total > 0 ? total : '-'}</td>
       <td>
         <button class="roster-btn" data-act="roster" data-id="${a.id}">
           ${roster.length > 0 ? `📝 編集（${roster.length}名）` : '＋ 登録'}
@@ -1589,6 +1778,7 @@ function renderWizStep3(c) {
       const id = uid();
       state.assignments.push({
         id, year: state.year, grade: +r.grade, class: r.class, subject: r.subject,
+        termHours: { 1: '', 2: '', 3: '' },
       });
       wizardData.createdAssignmentIds.push(id);
     });
@@ -1897,6 +2087,7 @@ function bindEvents() {
       grade: +grade,
       class: cls,
       subject,
+      termHours: { 1: '', 2: '', 3: '' },
     });
     save();
     $('#add-subject').value = '';
@@ -1921,6 +2112,27 @@ function bindEvents() {
         renderAssignmentsTable();
         toast('削除しました', 'success');
       });
+    }
+  });
+  // 学期別 授業時数の入力（即保存＋年間計の即時更新）
+  $('#assignments-tbody').addEventListener('input', e => {
+    const input = e.target.closest('.term-hours-input');
+    if (!input) return;
+    const asgId = input.dataset.id;
+    const term = input.dataset.term;
+    const asg = state.assignments.find(a => a.id === asgId);
+    if (!asg) return;
+    if (!asg.termHours) asg.termHours = { 1: '', 2: '', 3: '' };
+    // 半角数字のみ、空はそのまま空文字
+    const v = input.value.trim();
+    asg.termHours[term] = v === '' ? '' : Math.max(0, +v || 0);
+    save();
+    // 年間計セルを即時更新
+    const totalCell = input.closest('tr')?.querySelector('.term-total-cell');
+    if (totalCell) {
+      const total = getAnnualHours(asg);
+      totalCell.textContent = total > 0 ? total : '-';
+      totalCell.classList.toggle('has-hours', total > 0);
     }
   });
 
