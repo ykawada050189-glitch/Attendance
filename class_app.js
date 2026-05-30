@@ -2518,15 +2518,17 @@ function refreshMonthlyTable() {
   head += '</tr>';
   let body = '';
   stats.forEach(({ stu, counts }) => {
+    // 授業日数は「全体の授業日数 − 出停 − 忌引」で個人単位に補正
+    const effectiveClassDays = classDayCount - counts.suspended - counts.mourning;
     body += `<tr><td>${stu.no}</td><td>${escapeHtml(stu.name)}</td>`;
     for (const c of cols) {
-      const v = c.key === 'classDays' ? classDayCount : counts[c.key];
+      const v = c.key === 'classDays' ? effectiveClassDays : counts[c.key];
       body += `<td data-col="${c.key}">${v}</td>`;
     }
     body += '</tr>';
   });
   document.getElementById('monthly-table-area').innerHTML = `
-    <p class="hint">対象月: ${ym} / 授業日数: <strong>${classDayCount}日</strong></p>
+    <p class="hint">対象月: ${ym} / クラス全体の授業日数: <strong>${classDayCount}日</strong>（表の「授業日数」列は各生徒の <strong>出停・忌引</strong> 分を減算した個人別の日数を表示）</p>
     <table><thead>${head}</thead><tbody>${body}</tbody></table>
   `;
   document.querySelectorAll('.copy-btn').forEach(btn => {
