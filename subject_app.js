@@ -434,8 +434,8 @@ function computeStudentRunningTotals(asgId, studentNo, asgObj) {
       }
     });
   });
-  // 授業数（その生徒に対する）＝ 総実施回数 − 出停 − 忌引
-  const classes = totalSessions - st - mo;
+  // 授業数 = 総実施回数（出停・忌引でも減算しない＝クラス全員同じ値）
+  const classes = totalSessions;
   const limit = Math.floor(classes / 3);
   const remaining = limit - ab;
   const ns = {
@@ -607,7 +607,8 @@ function statsWithCurrentStatus(base, currentStatus, asg, currentDate) {
     '忌引': base['忌引'] + (currentStatus === '忌引' ? 1 : 0),
     '欠席': base['欠席'] + (currentStatus === '欠席' ? 1 : 0),
   };
-  ns.classes = ns.totalSessions - ns['出停'] - ns['忌引'];
+  // 授業数 = 総実施回数（出停・忌引でも減算しない）
+  ns.classes = ns.totalSessions;
   ns.limit = Math.floor(ns.classes / 3);
   ns.remaining = ns.limit - ns['欠席'];
 
@@ -1137,15 +1138,14 @@ function buildExportTable() {
   const totalClasses = sessions.length;
 
   // 生徒ごとの集計
-  // 授業数 = 期間内の総実施回数 −（その生徒の 出停 + 忌引）
-  // ※ 出停・忌引は「授業として数えない」扱い
+  // 授業数 = 期間内の総実施回数（クラス全員同じ値。出停・忌引でも減算しない）
   const rows = roster.map(stu => {
     const counts = { '公欠': 0, '出停': 0, '忌引': 0, '欠席': 0 };
     sessions.forEach(({date, period}) => {
       const st = attData[date][period][stu.no];
       if (st && counts[st] !== undefined) counts[st]++;
     });
-    const classes = totalClasses - counts['出停'] - counts['忌引'];
+    const classes = totalClasses;
     return { no: stu.no, name: stu.name, classes, ...counts };
   });
 
@@ -1160,7 +1160,7 @@ function buildExportTable() {
       総実施 ${totalClasses} 回 ／ 名簿 ${roster.length} 名
     </div>
     <p class="hint">期間: ${fmtDate(from)} 〜 ${fmtDate(to)} ／ 期間内の総実施回数 <strong>${totalClasses}</strong> 回 ／ 名簿 ${roster.length} 名<br>
-    ※「授業数」列は <strong>総実施回数 − 出停 − 忌引</strong> で算出（出停・忌引は授業として数えません）</p>
+    ※「授業数」列は<strong>クラス全員で同じ値（総実施回数）</strong>です。出停・忌引も授業数に含めます。</p>
   `;
   if (totalClasses === 0) {
     card.innerHTML += '<p class="empty-msg">期間内に入力済みデータがありません。</p>';
