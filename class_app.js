@@ -1913,7 +1913,8 @@ function computeSubjectStatistics() {
         if (!subj || !stat[subj]) continue;
         const ps = perPeriod[i];
         if (ps === 'absent' || ps === 'infirmary') stat[subj].absences++;
-        else if (ps === 'suspended' || ps === 'mourning' || ps === 'abroad' || ps === 'leave') stat[subj].total--;
+        // ※ 出停・忌引・留学・休学でも授業数からは減算しない
+        // （クラス全員で同じ授業数とするため。要望対応）
       }
     }
     perStudent[stu.no] = stat;
@@ -2518,8 +2519,8 @@ function refreshMonthlyTable() {
   head += '</tr>';
   let body = '';
   stats.forEach(({ stu, counts }) => {
-    // 授業日数は「全体の授業日数 − 出停 − 忌引」で個人単位に補正
-    const effectiveClassDays = classDayCount - counts.suspended - counts.mourning;
+    // 授業日数はクラス全員で同じ（出停・忌引でも減算しない）
+    const effectiveClassDays = classDayCount;
     body += `<tr><td>${stu.no}</td><td>${escapeHtml(stu.name)}</td>`;
     for (const c of cols) {
       const v = c.key === 'classDays' ? effectiveClassDays : counts[c.key];
@@ -2528,7 +2529,7 @@ function refreshMonthlyTable() {
     body += '</tr>';
   });
   document.getElementById('monthly-table-area').innerHTML = `
-    <p class="hint">対象月: ${ym} / クラス全体の授業日数: <strong>${classDayCount}日</strong>（表の「授業日数」列は各生徒の <strong>出停・忌引</strong> 分を減算した個人別の日数を表示）</p>
+    <p class="hint">対象月: ${ym} / クラス全体の授業日数: <strong>${classDayCount}日</strong>（「授業日数」列はクラス全員で同じ値です。出停・忌引も日数に含めます）</p>
     <table><thead>${head}</thead><tbody>${body}</tbody></table>
   `;
   document.querySelectorAll('.copy-btn').forEach(btn => {
@@ -2576,7 +2577,7 @@ function renderSubject() {
         </label>
         <span class="hint">クラス基準の年間授業数: <strong>${baseTotal}回</strong>（1/3=${Math.floor(baseTotal/3)}回）</span>
       </div>
-      <p class="hint">年間授業日数 = 通常授業＋試験日などで時間割に教科を登録した分の合計。個人の授業数は、その生徒の <strong>出停・忌引・留学・休学</strong> 分を減算。
+      <p class="hint">年間授業日数 = 通常授業＋試験日などで時間割に教科を登録した分の合計。<strong>授業数はクラス全員で同じ値です（出停・忌引・留学・休学も授業数に含めます）。</strong><br>
       欠席は <strong>「欠席」</strong>と<strong>「保健室」</strong>をカウント（公欠・遅刻・早退は出席扱い）。1/3超過は <span class="warn">赤色</span>。</p>
       <div style="overflow-x:auto;">
         <table>
