@@ -190,14 +190,24 @@
   </div>
 
   <div class="card">
-    <h3>③ 登録済みの担当授業</h3>
-    <p class="hint">右側の「名簿」ボタンから、各授業の名簿を登録・編集できます。</p>
+    <h3>③ 登録済みの担当授業 と 授業時数</h3>
+    <p class="hint">
+      ・「名簿」ボタンから各授業の名簿を登録・編集できます。<br>
+      ・各授業の<strong>授業時数</strong>を学期ごとに入力すると、その合計を基に <strong>1/3欠課ライン</strong> を計算し、
+      当日入力・過去入力で <strong>年間（残り5回以下）</strong> と <strong>学期（残り2回以下）</strong> の警告を表示します。<br>
+      ・授業時数が未入力の場合は、これまで通り「実施済みの授業数」をもとに計算します。<br>
+      ・学期区分：<strong>1学期=4-8月／2学期=9-12月／3学期=1-3月</strong>
+    </p>
     <table id="assignments-table">
       <thead>
         <tr>
           <th>学年</th>
           <th>クラス</th>
           <th>授業名</th>
+          <th class="th-term">1学期</th>
+          <th class="th-term">2学期</th>
+          <th class="th-term">3学期</th>
+          <th class="th-term th-total">年間計</th>
           <th>名簿</th>
           <th>削除</th>
         </tr>
