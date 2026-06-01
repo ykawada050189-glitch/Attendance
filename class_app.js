@@ -505,11 +505,11 @@ const WIZARD_STEPS = [
   { id: 3, title: 'クラス情報' },
   { id: 4, title: '生徒名簿' },
   { id: 5, title: '時間割' },
-  { id: 6, title: 'カレンダー' },
-  { id: 7, title: '完了' },
+  { id: 6, title: '完了' },
 ];
+const LAST_WIZARD_STEP = 6;
 let wizardStep = 1;
-const wizardApplied = { step2:false, step3:false, step4:false, step5:false, step6:false };
+const wizardApplied = { step2:false, step3:false, step4:false, step5:false };
 let wizardCommit = null; // 各ステップが「登録」ボタン押下時に実行する関数を設定する
 const wizardSession = { step5InitDone: false }; // セッション内フラグ(時間割クリア済みなど)
 
@@ -535,26 +535,25 @@ function renderYearUpdate() {
     case 3: renderWizardStep3(c); break;
     case 4: renderWizardStep4(c); break;
     case 5: renderWizardStep5(c); break;
-    case 6: renderWizardStep6(c); break;
-    case 7: renderWizardStep7(c); break;
+    case 6: renderWizardStep7(c); break; // ステップ6 = 完了画面
   }
   // ナビボタン
   const back = document.getElementById('wizard-back');
   const skip = document.getElementById('wizard-skip');
   const next = document.getElementById('wizard-next');
   back.disabled = (wizardStep === 1);
-  if (wizardStep === 1 || wizardStep === 7) skip.style.display = 'none';
+  if (wizardStep === 1 || wizardStep === LAST_WIZARD_STEP) skip.style.display = 'none';
   else skip.style.display = '';
-  if (wizardStep === 7) {
+  if (wizardStep === LAST_WIZARD_STEP) {
     next.textContent = '🏠 ホームへ戻る';
     next.classList.add('primary');
   } else {
     next.textContent = '登録';
   }
   back.onclick = () => { if (wizardStep > 1) { wizardStep--; renderYearUpdate(); } };
-  skip.onclick = () => { if (wizardStep < 7) { wizardStep++; renderYearUpdate(); } };
+  skip.onclick = () => { if (wizardStep < LAST_WIZARD_STEP) { wizardStep++; renderYearUpdate(); } };
   next.onclick = () => {
-    if (wizardStep === 7) {
+    if (wizardStep === LAST_WIZARD_STEP) {
       // 完了 → ダッシュボード
       wizardStep = 1;
       Object.keys(wizardApplied).forEach(k => wizardApplied[k] = false);
@@ -596,9 +595,8 @@ function renderWizardStep1(c) {
       <li>クラス情報の更新（年度・学年・クラス）</li>
       <li>生徒名簿の更新（Excel取り込み等）</li>
       <li>時間割の更新</li>
-      <li>カレンダーCSVの取り込み</li>
     </ol>
-    <p class="hint">「次へ ▶」を押して開始してください。各ステップでは「スキップ」「戻る」が使えます。後から「初期設定」タブで個別に編集することも可能です。</p>
+    <p class="hint">「登録」を押して開始してください。各ステップでは「スキップ」「戻る」が使えます。後から「登録情報」タブで個別に編集することも可能です。<br>カレンダーは <code>class_calendar.csv</code> から自動同期されるため、このウィザードでの操作は不要です。</p>
   `;
 }
 
@@ -1138,62 +1136,16 @@ function buildSubjectOptions(currentValue, subjects) {
   return html;
 }
 
-// Step 6: カレンダー
-function renderWizardStep6(c) {
-  const calCount = state.calendar.length;
-  let dateRange = '';
-  if (calCount > 0) {
-    dateRange = ` (${state.calendar[0].date} 〜 ${state.calendar[calCount-1].date})`;
-  }
-  c.innerHTML = `
-    <h3>6. カレンダーCSVの更新 ${wizardApplied.step6 ? '<span class="wizard-applied">✓ 更新済</span>' : ''}</h3>
-    <div class="wizard-current-info">
-      現在のカレンダー: <strong>${calCount}日分</strong>${dateRange}
-    </div>
-    <p>新年度のカレンダーCSVをアップロードしてください。「行事名,日付」形式またはGoogleカレンダー形式に対応しています。</p>
-    <div class="wizard-choice-block" id="wiz-cal-keep">
-      <h4>① 現在のカレンダーを維持する</h4>
-      <p class="hint" style="margin:0;">既にこの年度のカレンダーが取り込まれている場合。</p>
-    </div>
-    <div class="wizard-choice-block">
-      <h4>② 新しいCSVを取り込む（既存は上書きされます）</h4>
-      <input type="file" id="wiz-cal-file" accept=".csv" style="margin-top:8px;">
-      <p class="hint" id="wiz-cal-status" style="margin:6px 0 0;"></p>
-    </div>
-  `;
-  document.getElementById('wiz-cal-keep').onclick = () => {
-    wizardApplied.step6 = true;
-    toast('カレンダーを維持します', 'success');
-    renderYearUpdate();
-  };
-  document.getElementById('wiz-cal-file').addEventListener('change', (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const n = importCalendarCSV(reader.result);
-        document.getElementById('wiz-cal-status').textContent = `✓ ${n}日分を取り込みました`;
-        wizardApplied.step6 = true;
-        toast(`カレンダーを取り込みました（${n}日）`, 'success');
-        setTimeout(() => renderYearUpdate(), 600);
-      } catch (err) { toast('CSV読込失敗: ' + err.message, 'error'); }
-    };
-    reader.readAsText(f, 'UTF-8');
-  });
-}
-
-// Step 7: 完了
+// Step 6: 完了 (旧Step 7)
 function renderWizardStep7(c) {
   const checks = [
     { ok: wizardApplied.step2, label: '過年度データのアーカイブ' },
     { ok: wizardApplied.step3, label: 'クラス情報の更新' },
     { ok: wizardApplied.step4, label: '生徒名簿の更新' },
     { ok: wizardApplied.step5, label: '時間割の更新' },
-    { ok: wizardApplied.step6, label: 'カレンダーの更新' },
   ];
   c.innerHTML = `
-    <h3>7. 年度更新が完了しました 🎉</h3>
+    <h3>6. 年度更新が完了しました 🎉</h3>
     <p>新年度の準備が完了しました。「ホームへ戻る」を押してください。</p>
     <div class="wizard-current-info">
       <div><strong>新しい状況</strong></div>
@@ -1201,14 +1153,14 @@ function renderWizardStep7(c) {
         <li>年度: <strong>${state.config.year}年度</strong></li>
         <li>クラス: <strong>${getClassName()}</strong></li>
         <li>生徒数: <strong>${state.students.length}名</strong></li>
-        <li>カレンダー: <strong>${state.calendar.length}日分</strong></li>
+        <li>カレンダー: <strong>${state.calendar.length}日分</strong>（共有 <code>class_calendar.csv</code> から自動同期）</li>
       </ul>
     </div>
     <p><strong>このウィザードで実施した操作</strong></p>
     <ul>
       ${checks.map(ch => `<li>${ch.ok?'✅':'⏭️'} ${escapeHtml(ch.label)}${ch.ok?'':' (スキップ)'}</li>`).join('')}
     </ul>
-    <p class="hint">後から「初期設定」「データ管理」「ルール編集」タブで個別に変更できます。</p>
+    <p class="hint">後から「登録情報」「データ管理」「ルール編集」タブで個別に変更できます。カレンダーは管理者がリポジトリの <code>class_calendar.csv</code> を更新すると自動反映されます。</p>
   `;
 }
 
@@ -3141,6 +3093,40 @@ updateClassInfoBar();
 showView('dashboard');
 markSaved();
 updateStorageIndicator();
+
+// =====================================================
+// 共有カレンダー(class_calendar.csv)の自動同期
+// リポジトリにある class_calendar.csv を起動時に取得し、
+// 内容が変わっていれば自動でカレンダーを更新する。
+// (file:// で開いた場合や CSV が存在しない場合は静かに無視)
+// =====================================================
+const SHARED_CALENDAR_HASH_KEY = 'shared-calendar-hash';
+async function sha256hex(text) {
+  if (!crypto.subtle) return String(text.length);
+  const buf = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+(async function syncSharedCalendar() {
+  try {
+    // file:// では fetch が失敗するので静かに終了
+    const resp = await fetch('class_calendar.csv', { cache: 'no-cache' });
+    if (!resp.ok) return;
+    const text = await resp.text();
+    if (!text || text.trim().length < 10) return;
+    const hash = await sha256hex(text);
+    const storedHash = localStorage.getItem(SHARED_CALENDAR_HASH_KEY);
+    if (storedHash === hash) return; // 変更なし
+    // カレンダー更新
+    const n = importCalendarCSV(text);
+    localStorage.setItem(SHARED_CALENDAR_HASH_KEY, hash);
+    toast(`共有カレンダーを更新しました（${n}日）`, 'success');
+    refreshCurrentView();
+  } catch (e) {
+    // ネットワークエラー/CSV未配置 → 何もしない
+    console.info('共有カレンダー未取得（個別アップロード可能）:', e.message);
+  }
+})();
 
 // データ保護：永続化要求 + インジケータ
 (async () => {
