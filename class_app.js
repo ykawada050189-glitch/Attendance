@@ -2753,11 +2753,29 @@ function renderSetupSubjectPills() {
 }
 function refreshCalendarStatus() {
   const div = document.getElementById('calendar-status');
-  if (state.calendar.length === 0) div.innerHTML = '<p class="hint">未登録</p>';
-  else {
-    const first = state.calendar[0].date, last = state.calendar[state.calendar.length-1].date;
-    div.innerHTML = `<p>登録済: ${state.calendar.length}日 (${first} 〜 ${last})</p>`;
+  if (state.calendar.length === 0) {
+    div.innerHTML = '<p class="hint">未登録</p>';
+    return;
   }
+  const first = state.calendar[0].date, last = state.calendar[state.calendar.length-1].date;
+  let syncBadge = '';
+  try {
+    const info = JSON.parse(localStorage.getItem('calendar-sync-info') || '{}');
+    if (info.timestamp) {
+      const t = new Date(info.timestamp);
+      const ts = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+      if (info.source === 'auto') {
+        syncBadge = `<p style="margin:4px 0; padding:6px 10px; background:#eafaf5; border-left:3px solid var(--primary); border-radius:4px; font-size:13px;">
+          ✓ <strong>共有カレンダーから自動同期</strong> ／ 最終更新: ${ts}
+        </p>`;
+      } else {
+        syncBadge = `<p style="margin:4px 0; padding:6px 10px; background:var(--pill-bg); border-left:3px solid var(--c-tardy); border-radius:4px; font-size:13px;">
+          📁 <strong>個別アップロードで設定</strong> ／ 取り込み日時: ${ts}
+        </p>`;
+      }
+    }
+  } catch(e) {}
+  div.innerHTML = `<p>登録済: ${state.calendar.length}日 (${first} 〜 ${last})</p>${syncBadge}`;
 }
 function refreshExcelStatus() {
   const div = document.getElementById('students-excel-status');
@@ -2999,6 +3017,7 @@ document.getElementById('calendar-csv').addEventListener('change', (e) => {
   reader.onload = () => {
     try {
       const n = importCalendarCSV(reader.result);
+      localStorage.setItem('calendar-sync-info', JSON.stringify({ source: 'manual', timestamp: new Date().toISOString() }));
       toast(`カレンダーを取り込みました（${n}日）`, 'success');
       refreshCalendarStatus();
     } catch (err) { toast('CSV読込失敗: ' + err.message, 'error'); }
@@ -3116,10 +3135,18 @@ async function sha256hex(text) {
     if (!text || text.trim().length < 10) return;
     const hash = await sha256hex(text);
     const storedHash = localStorage.getItem(SHARED_CALENDAR_HASH_KEY);
-    if (storedHash === hash) return; // 変更なし
+    if (storedHash === hash) {
+      // 内容は同じだが、自動同期されている事実をメタ情報として残す
+      const info = JSON.parse(localStorage.getItem('calendar-sync-info') || '{}');
+      if (info.source !== 'auto') {
+        localStorage.setItem('calendar-sync-info', JSON.stringify({ source: 'auto', timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
     // カレンダー更新
     const n = importCalendarCSV(text);
     localStorage.setItem(SHARED_CALENDAR_HASH_KEY, hash);
+    localStorage.setItem('calendar-sync-info', JSON.stringify({ source: 'auto', timestamp: new Date().toISOString() }));
     toast(`共有カレンダーを更新しました（${n}日）`, 'success');
     refreshCurrentView();
   } catch (e) {
