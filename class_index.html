@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none';">
 <meta name="referrer" content="no-referrer">
 <title>【クラス】出欠管理アプリ</title>
 <link rel="stylesheet" href="class_style.css">
@@ -175,6 +175,9 @@
   <div class="card">
     <h3>④ 年間カレンダーCSV</h3>
     <p class="hint">A列=行事名、B列=日付。1行目はヘッダ。Googleカレンダー形式（Subject, Start Date…）にも対応。</p>
+    <p class="hint" style="background:#eafaf5; padding:6px 10px; border-radius:4px; border-left:3px solid var(--primary);">
+      ℹ️ 管理者が共有カレンダー(<code>class_calendar.csv</code>)をリポジトリに置いている場合は、起動時に自動取得・反映されます。個別アップロードは不要ですが、独自に上書きしたい場合はここから読み込めます。
+    </p>
     <input type="file" id="calendar-csv" accept=".csv">
     <div id="calendar-status"></div>
   </div>
